@@ -5,6 +5,9 @@ tests each underlying SDK operation once.  Async counterparts and camelCase
 aliases are intentionally not repeated because they route to the same host
 commands.
 
+Detailed results are printed to stdout.  Concise start, per-API progress, and
+final-summary messages are also sent to the host with ``lython.notify()``.
+
 Some APIs necessarily have side effects.  The runner updates existing
 characters/chat messages/memories without changing their values when suitable
 records exist.  If there is no chat message or memory to update, it creates a
@@ -41,6 +44,7 @@ from lython import (
 DEFAULT_TIMEOUT_SECONDS = 60.0
 GENERATION_TIMEOUT_SECONDS = 300.0
 TTS_TIMEOUT_SECONDS = 180.0
+EXPECTED_API_COUNT = 26
 
 # Set this to True when using the script from a test harness that relies on a
 # non-zero exit code.  False is friendlier to Layla's interactive runner.
@@ -70,6 +74,25 @@ class TestResult:
 
 
 RESULTS: list[TestResult] = []
+NOTIFICATIONS_ENABLED = True
+
+
+def notify_progress(message: str) -> None:
+    """Notify the host without allowing progress reporting to stop the run."""
+
+    global NOTIFICATIONS_ENABLED
+    if not NOTIFICATIONS_ENABLED:
+        return
+
+    try:
+        lython.notify(f"{MARKER} {message}")
+    except Exception as exc:
+        NOTIFICATIONS_ENABLED = False
+        LOG.warning(
+            "Host progress notifications disabled after notify failed: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
 
 
 def _json_default(value: Any) -> str:
@@ -175,6 +198,8 @@ def run_api(
     purpose: str,
     validate: Callable[[Any], None] | None = None,
 ) -> Any:
+    position = len(RESULTS) + 1
+    notify_progress(f"Running {position}/{EXPECTED_API_COUNT}: {name}")
     LOG.info("RUN  %-42s | %s", name, purpose)
     started = time.monotonic()
     try:
@@ -334,7 +359,9 @@ def select_string_id(items: Any) -> str | None:
 
 
 def main() -> int:
+    global NOTIFICATIONS_ENABLED
     RESULTS.clear()
+    NOTIFICATIONS_ENABLED = True
     LOG.info("Lython SDK API diagnostic started")
     LOG.info(
         "SDK wire format=direct Layla messages | Python=%s",
@@ -344,6 +371,7 @@ def main() -> int:
         "This full diagnostic invokes state-changing and media APIs. See the "
         "module docstring for the side-effect policy."
     )
+    notify_progress(f"Started; running {EXPECTED_API_COUNT} API checks")
 
     context = run_api(
         "contextual.get_execution_context",
@@ -672,15 +700,26 @@ def main() -> int:
         LOG.info("%-4s %-42s %8.3fs%s", result.status, result.name, result.seconds, suffix)
     LOG.info("=" * 88)
 
-    if len(RESULTS) != 26:
-        LOG.error("Internal runner error: expected 26 API results, recorded %d", len(RESULTS))
+    if len(RESULTS) != EXPECTED_API_COUNT:
+        LOG.error(
+            "Internal runner error: expected %d API results, recorded %d",
+            EXPECTED_API_COUNT,
+            len(RESULTS),
+        )
         failed += 1
+    notify_progress(
+        f"Complete: {passed} PASS, {failed} FAIL, {skipped} SKIP, "
+        f"{len(RESULTS)} TOTAL"
+    )
     if failed:
         LOG.error("Diagnostic completed with failures. Search above for 'FAIL'.")
     elif skipped:
         LOG.warning("Diagnostic had no failures, but some APIs were skipped due to missing prerequisites.")
     else:
-        LOG.info("All 26 unique Lython one-shot APIs completed successfully.")
+        LOG.info(
+            "All %d unique Lython one-shot APIs completed successfully.",
+            EXPECTED_API_COUNT,
+        )
     return 1 if failed else 0
 
 
