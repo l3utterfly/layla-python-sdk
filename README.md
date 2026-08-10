@@ -190,3 +190,20 @@ the standard library:
 $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 ```
+
+## Releases
+
+GitHub Releases contain a universal Python wheel and a source distribution.
+To publish a release:
+
+1. Update `project.version` in `pyproject.toml` and commit the change.
+2. Create a matching tag, such as `v0.1.0` for package version `0.1.0`.
+3. Push the tag to GitHub.
+
+The release workflow runs the test suite, builds and checks both distributions,
+and then creates the GitHub Release with automatically generated notes. A tag
+that does not match `project.version` is rejected.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See `LICENSE`.
