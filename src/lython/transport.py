@@ -21,9 +21,8 @@ from .errors import (
 )
 from .protocol import (
     decode_layla_event,
-    decode_response_envelope,
+    decode_layla_request,
     encode_layla_request,
-    encode_request_envelope,
 )
 
 
@@ -99,11 +98,13 @@ class LythonTransport:
                 "request_id_factory must return a non-empty string"
             )
 
-        envelope = encode_request_envelope(message)
+        # Validate caller-provided JSON, then pass it through unchanged. The
+        # native request ID already carries the correlation information.
+        decode_layla_request(message)
         native = self._get_native_module()
 
         try:
-            raw_response = native.request(request_id, envelope, native_timeout)
+            raw_response = native.request(request_id, message, native_timeout)
         except TimeoutError as exc:
             raise LythonTimeoutError(
                 f"Layla request {request_id} timed out"
@@ -119,19 +120,7 @@ class LythonTransport:
                 f"Native request {request_id} failed: {exc}"
             ) from exc
 
-        response = decode_response_envelope(raw_response)
-        if not response.ok:
-            assert response.error is not None
-            raise LythonHostError(
-                response.error.message,
-                code=response.error.code,
-                details=response.error.details,
-                retryable=response.error.retryable,
-                raw_message=response.message,
-            )
-
-        assert response.message is not None
-        event_message = decode_layla_event(response.message)
+        event_message = decode_layla_event(raw_response)
         event_name = event_message["event"]
 
         if event_name == "on_error":
@@ -144,7 +133,7 @@ class LythonTransport:
             raise LythonHostError(
                 host_message,
                 code="layla_api_error",
-                raw_message=response.message,
+                raw_message=raw_response,
             )
 
         if event_name != expected_event:
@@ -157,7 +146,7 @@ class LythonTransport:
             event=event_name,
             data=event_message.get("data"),
             message=event_message,
-            raw_message=response.message,
+            raw_message=raw_response,
         )
 
     async def request_async(
@@ -224,4 +213,3 @@ class LythonTransport:
         if not math.isfinite(value) or value < 0:
             raise ValueError("timeout must be a finite non-negative number or None")
         return value
-

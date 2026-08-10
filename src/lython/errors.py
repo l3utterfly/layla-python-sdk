@@ -30,7 +30,7 @@ class LythonExecutionError(LythonTransportError, RuntimeError):
 
 
 class LythonHostError(LythonError):
-    """The React Native host returned a structured failure response."""
+    """The React Native host returned an ``on_error`` event."""
 
     def __init__(
         self,
@@ -46,4 +46,3 @@ class LythonHostError(LythonError):
         self.details = details
         self.retryable = retryable
         self.raw_message = raw_message
-

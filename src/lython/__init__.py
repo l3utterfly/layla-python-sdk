@@ -10,18 +10,9 @@ from .errors import (
     LythonTransportError,
 )
 from .protocol import (
-    PROTOCOL_NAME,
-    PROTOCOL_VERSION,
-    ErrorPayload,
-    ResponseEnvelope,
     decode_layla_event,
     decode_layla_request,
-    decode_request_envelope,
-    decode_response_envelope,
-    encode_error_response,
     encode_layla_request,
-    encode_request_envelope,
-    encode_success_response,
 )
 from .request import OneShotRequestTemplate
 from .resources import (
@@ -51,9 +42,6 @@ tts = _client.tts
 contextual = _client.contextual
 
 __all__ = [
-    "PROTOCOL_NAME",
-    "PROTOCOL_VERSION",
-    "ErrorPayload",
     "LythonError",
     "LythonExecutionError",
     "LythonHostError",
@@ -65,7 +53,6 @@ __all__ = [
     "LythonTransportError",
     "OneShotRequestTemplate",
     "OneShotResponse",
-    "ResponseEnvelope",
     "Chat",
     "Characters",
     "Classifier",
@@ -81,12 +68,7 @@ __all__ = [
     "contextual",
     "decode_layla_event",
     "decode_layla_request",
-    "decode_request_envelope",
-    "decode_response_envelope",
-    "encode_error_response",
     "encode_layla_request",
-    "encode_request_envelope",
-    "encode_success_response",
     "images",
     "memories",
     "personas",

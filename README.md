@@ -2,7 +2,7 @@
 
 `lython` is the standard-library-only Python SDK for code running inside
 Layla's embedded Python runtime. It wraps the private `lython_native` string
-transport with a versioned, JSON-encoded one-shot request protocol.
+transport with the existing JSON-encoded Layla WebView message format.
 
 The SDK mirrors the one-shot API surface of `@layla-network/sdk` 7.2.2. It does
 not provide streaming responses, progress events, contextual subscriptions, or
@@ -83,72 +83,38 @@ final message's `reasoning` field. Token events are not forwarded to Python.
 
 ## Protocol
 
-The existing React Native WebView API messages remain unchanged. A request such
-as:
+Requests are the existing React Native WebView API messages. For example,
+`lython_native.request()` receives this JSON string directly:
 
 ```json
 {"cmd":"get_characters","data":{"offset":0,"limit":10}}
 ```
 
-is serialized once and stored verbatim in the Lython request envelope's
-`message` field:
-
-```json
-{
-  "protocol": "layla.lython",
-  "version": 1,
-  "type": "request",
-  "message": "{\"cmd\":\"get_characters\",\"data\":{\"offset\":0,\"limit\":10}}"
-}
-```
-
 The native request ID is passed separately to `lython_native.request()` and is
-not duplicated in the JSON envelope.
-
-A successful host response wraps the existing WebView event JSON in the same
-way:
+not duplicated in the JSON message. The host returns the terminal WebView event
+directly:
 
 ```json
-{
-  "protocol": "layla.lython",
-  "version": 1,
-  "type": "response",
-  "ok": true,
-  "message": "{\"event\":\"on_get_characters_response\",\"data\":[]}"
-}
+{"event":"on_get_characters_response","data":[]}
 ```
 
-A failed host request uses a structured error:
+Host failures use the existing `on_error` event:
 
 ```json
-{
-  "protocol": "layla.lython",
-  "version": 1,
-  "type": "response",
-  "ok": false,
-  "error": {
-    "code": "host_error",
-    "message": "Unable to load characters",
-    "retryable": false
-  }
-}
+{"event":"on_error","data":{"message":"Unable to load characters"}}
 ```
-
-An optional `message` may also be included in a failed response when the host
-has an original `on_error` WebView event to preserve.
 
 ## Host integration
 
 The React Native Lython request listener should:
 
-1. Parse and validate the outer Lython request envelope.
-2. Pass the inner `message` string directly to
+1. Pass the request JSON string directly to
    `RNWebviewApiService.handleLaylaApiMessage(message)`.
-3. Capture the one terminal WebView API event for that command.
-4. Encode that event as a JSON string in a success response envelope.
-5. Call `Lython.respond(executionId, requestId, responseEnvelope)` exactly once.
-6. Return an error envelope for malformed requests, unknown commands, handler
-   errors, and `on_error` terminal events.
+2. Capture the one terminal WebView API event for that command.
+3. Encode that event directly as a JSON string.
+4. Call `Lython.respond(executionId, requestId, responseMessage)` exactly once.
+5. Return an `on_error` event for malformed requests, unknown commands, and
+   handler errors.
 
 Commands that currently emit intermediate events must be adapted by the host
 to produce a single terminal response. Intermediate chat tokens and image

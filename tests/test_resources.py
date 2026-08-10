@@ -8,8 +8,6 @@ from lython import (
     LythonClient,
     LythonError,
     LythonTransport,
-    decode_request_envelope,
-    encode_success_response,
 )
 
 
@@ -52,12 +50,10 @@ class RoutingNative:
         }
 
     def request(self, request_id: str, message: str, timeout: float | None) -> str:
-        request = json.loads(decode_request_envelope(message))
+        request = json.loads(message)
         self.calls.append(request)
         event, data = self.responses[request["cmd"]]
-        return encode_success_response(
-            json.dumps({"event": event, "data": data}, separators=(",", ":"))
-        )
+        return json.dumps({"event": event, "data": data}, separators=(",", ":"))
 
 
 class ResourceTests(unittest.TestCase):

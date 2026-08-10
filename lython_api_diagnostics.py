@@ -147,8 +147,8 @@ def _failure_details(exc: Exception) -> dict[str, Any]:
         )
     elif isinstance(exc, LythonProtocolError):
         details["likely_cause"] = (
-            "Layla returned a response whose envelope, terminal event, or data "
-            "shape did not match the SDK contract."
+            "Layla returned a response whose terminal event or data shape did "
+            "not match the SDK contract."
         )
     elif isinstance(exc, LythonTransportError):
         details["likely_cause"] = (
@@ -337,9 +337,7 @@ def main() -> int:
     RESULTS.clear()
     LOG.info("Lython SDK API diagnostic started")
     LOG.info(
-        "SDK protocol=%s version=%s | Python=%s",
-        getattr(lython, "PROTOCOL_NAME", "unknown"),
-        getattr(lython, "PROTOCOL_VERSION", "unknown"),
+        "SDK wire format=direct Layla messages | Python=%s",
         sys.version.replace("\n", " "),
     )
     LOG.warning(

@@ -10,9 +10,6 @@ from lython import (
     LythonTimeoutError,
     LythonTransport,
     OneShotRequestTemplate,
-    decode_request_envelope,
-    encode_error_response,
-    encode_success_response,
 )
 
 
@@ -29,11 +26,9 @@ class FakeNative:
 
 
 class TransportTests(unittest.TestCase):
-    def test_sends_wrapped_typescript_message_and_returns_event_data(self) -> None:
+    def test_sends_typescript_message_directly_and_returns_event_data(self) -> None:
         native = FakeNative(
-            encode_success_response(
-                '{"event":"on_get_characters_response","data":[{"id":"1"}]}'
-            )
+            '{"event":"on_get_characters_response","data":[{"id":"1"}]}'
         )
         transport = LythonTransport(
             native_module=native,
@@ -50,44 +45,24 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(response.data, [{"id": "1"}])
         self.assertEqual(native.calls[0][0], "request-1")
         self.assertEqual(native.calls[0][2], 42.0)
-        inner = decode_request_envelope(native.calls[0][1])
         self.assertEqual(
-            json.loads(inner),
+            json.loads(native.calls[0][1]),
             {"cmd": "get_characters", "data": {"offset": 0, "limit": 10}},
         )
+        self.assertNotIn("protocol", json.loads(native.calls[0][1]))
 
     def test_request_json_preserves_caller_serialization(self) -> None:
-        native = FakeNative(
-            encode_success_response('{"event":"done","data":null}')
-        )
+        native = FakeNative('{"event":"done","data":null}')
         transport = LythonTransport(native_module=native)
         message = '{ "cmd": "example", "data": null }'
 
         transport.request_json(message, "done")
 
-        self.assertEqual(decode_request_envelope(native.calls[0][1]), message)
-
-    def test_structured_host_error_is_raised(self) -> None:
-        native = FakeNative(
-            encode_error_response(
-                "database_error",
-                "Database unavailable",
-                retryable=True,
-            )
-        )
-        transport = LythonTransport(native_module=native)
-
-        with self.assertRaises(LythonHostError) as caught:
-            transport.request({"cmd": "get_characters", "data": None}, "done")
-
-        self.assertEqual(caught.exception.code, "database_error")
-        self.assertTrue(caught.exception.retryable)
+        self.assertEqual(native.calls[0][1], message)
 
     def test_on_error_event_is_raised_as_host_error(self) -> None:
         native = FakeNative(
-            encode_success_response(
-                '{"event":"on_error","data":{"message":"Model unavailable"}}'
-            )
+            '{"event":"on_error","data":{"message":"Model unavailable"}}'
         )
         transport = LythonTransport(native_module=native)
 
@@ -98,9 +73,7 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "layla_api_error")
 
     def test_unexpected_terminal_event_is_protocol_error(self) -> None:
-        native = FakeNative(
-            encode_success_response('{"event":"wrong_event","data":null}')
-        )
+        native = FakeNative('{"event":"wrong_event","data":null}')
         transport = LythonTransport(native_module=native)
 
         with self.assertRaises(LythonProtocolError):
@@ -113,24 +86,20 @@ class TransportTests(unittest.TestCase):
             transport.request({"cmd": "example", "data": None}, "done")
 
     def test_template_builds_existing_command_shape(self) -> None:
-        native = FakeNative(
-            encode_success_response('{"event":"example_response","data":{"ok":true}}')
-        )
+        native = FakeNative('{"event":"example_response","data":{"ok":true}}')
         transport = LythonTransport(native_module=native)
         template = OneShotRequestTemplate("example", "example_response")
 
         data = template.send(transport, {"value": 3})
 
         self.assertEqual(data, {"ok": True})
-        inner = json.loads(decode_request_envelope(native.calls[0][1]))
-        self.assertEqual(inner, {"cmd": "example", "data": {"value": 3}})
+        message = json.loads(native.calls[0][1])
+        self.assertEqual(message, {"cmd": "example", "data": {"value": 3}})
 
 
 class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
     async def test_async_template_uses_one_shot_transport(self) -> None:
-        native = FakeNative(
-            encode_success_response('{"event":"example_response","data":7}')
-        )
+        native = FakeNative('{"event":"example_response","data":7}')
         transport = LythonTransport(native_module=native)
         template = OneShotRequestTemplate("example", "example_response")
 
@@ -154,9 +123,7 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
         import threading
 
         loop_thread = threading.get_ident()
-        native = ThreadCapturingNative(
-            encode_success_response('{"event":"done","data":null}')
-        )
+        native = ThreadCapturingNative('{"event":"done","data":null}')
         transport = LythonTransport(native_module=native)
 
         await transport.request_async({"cmd": "example", "data": None}, "done")
