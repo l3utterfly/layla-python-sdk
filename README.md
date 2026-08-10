@@ -4,9 +4,82 @@
 Layla's embedded Python runtime. It wraps the private `lython_native` string
 transport with a versioned, JSON-encoded one-shot request protocol.
 
-This first version intentionally supports only one-shot requests. It does not
-provide streaming responses, progress events, unsolicited events, or
+The SDK mirrors the one-shot API surface of `@layla-network/sdk` 7.2.2. It does
+not provide streaming responses, progress events, contextual subscriptions, or
 fire-and-forget notifications.
+
+## High-level API
+
+Import the package and use the same resource paths as the TypeScript SDK, with
+Python-style method names:
+
+```python
+import lython
+
+characters = lython.characters.list()
+history = lython.chat.get_chat_history("session-id")
+persona = lython.personas.get()
+
+completion = lython.chat.completions.create(
+    messages=[
+        {"role": "system", "content": "You are concise."},
+        {"role": "user", "content": "Give me one chess tip."},
+    ]
+)
+text = completion["choices"][0]["message"]["content"]
+```
+
+The resources are `characters`, `chat`, `classifier`, `images`, `memories`,
+`personas`, `tts`, `utils`, and `contextual`. TypeScript camelCase aliases are
+also available, so both `lython.characters.get_image(...)` and
+`lython.characters.getImage(...)` work. Every synchronous method has an async
+counterpart ending in `_async`, such as:
+
+```python
+characters = await lython.characters.list_async()
+```
+
+The mirrored one-shot methods are:
+
+- `characters`: `list`, `get_image`, `update`
+- `chat`: `completions.create`, inference-engine selection, history and
+  session reads, message saves, and scheduled-message operations
+- `classifier`: `get_sentiment`
+- `images`: image-model listing and final-only `generate_image`
+- `memories`: `list`, `get_top_memories`, `create_or_update`
+- `personas`: `get`
+- `tts`: voice listing, playback, generation to file, and stop
+- `utils`: `save_file`, `read_file`
+- `contextual`: `get_execution_context` only
+
+Background-audio controls and all contextual `on`/`off` event subscriptions are
+intentionally absent because they are not one-shot APIs.
+
+For dependency injection or a non-default timeout, create a client explicitly:
+
+```python
+from lython import LythonClient, LythonTransport
+
+client = LythonClient(LythonTransport(default_timeout=120))
+characters = client.characters.list()
+```
+
+### One-shot chat
+
+Only `chat.completions.create(...)` is implemented. It accepts OpenAI-shaped
+text and base64 image messages and returns the same final `chat.completion`
+dictionary as the TypeScript non-streaming call. Passing `stream=True` is an
+error.
+
+The host adapter must consolidate chat generation into one terminal event:
+
+```json
+{"event":"on_message_end","data":{"msg":"The complete final response"}}
+```
+
+`data` may instead be a complete OpenAI-shaped chat completion. A `reasoning`
+field is preserved, and `<think>...</think>` content is separated into the
+final message's `reasoning` field. Token events are not forwarded to Python.
 
 ## Protocol
 
@@ -117,4 +190,3 @@ the standard library:
 $env:PYTHONPATH = "src"
 python -m unittest discover -s tests -v
 ```
-
