@@ -4,6 +4,7 @@ import json
 import unittest
 from typing import Any
 
+import lython
 from lython import (
     LythonClient,
     LythonError,
@@ -14,6 +15,7 @@ from lython import (
 class RoutingNative:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.notifications: list[str] = []
         self.responses: dict[str, tuple[str, Any]] = {
             "get_characters": ("on_get_characters_response", [{"id": "aria"}]),
             "get_character_image": (
@@ -48,6 +50,9 @@ class RoutingNative:
             "read_file": ("on_read_file_response", {"filename": "a.txt", "content_base64": "data:text/plain;base64,QQ=="}),
             "get_execution_context": ("on_get_execution_context_response", {"app_version": "1", "character": None, "session_id": None}),
         }
+
+    def send(self, message: str) -> None:
+        self.notifications.append(message)
 
     def request(self, request_id: str, message: str, timeout: float | None) -> str:
         request = json.loads(message)
@@ -105,6 +110,22 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(self.client.contextual.get_execution_context()["app_version"], "1")
 
         self.assertEqual(set(self.native.responses), {call["cmd"] for call in self.native.calls})
+
+    def test_client_notify_sends_without_waiting_for_a_response(self) -> None:
+        self.assertIsNone(self.client.notify("Import complete"))
+        self.assertEqual(self.native.notifications, ["Import complete"])
+        self.assertEqual(self.native.calls, [])
+
+    def test_package_notify_uses_default_client(self) -> None:
+        default_client = lython._client
+        try:
+            lython._client = self.client
+            self.assertIsNone(lython.notify("Index refreshed"))
+        finally:
+            lython._client = default_client
+
+        self.assertEqual(self.native.notifications, ["Index refreshed"])
+        self.assertIn("notify", lython.__all__)
 
     def test_chat_normalizes_openai_image_parts_and_has_no_streaming(self) -> None:
         image = "data:image/png;base64,AA=="

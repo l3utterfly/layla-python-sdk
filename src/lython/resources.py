@@ -695,3 +695,8 @@ class LythonClient:
         self.personas = Personas(self.transport)
         self.tts = TTS(self.transport)
         self.contextual = Contextual(self.transport)
+
+    def notify(self, message: str) -> None:
+        """Send a fire-and-forget notification string to the Layla host."""
+
+        self.transport.notify(message)

@@ -75,6 +75,9 @@ one base64 image data URL at most per message.
 - Use final-only image generation; do not add progress callbacks or events.
 - Use `contextual.get_execution_context`; do not add contextual `on`/`off`
   subscriptions.
+- Use `lython.notify(message)` for the intentional fire-and-forget host
+  notification path. It calls `lython_native.send()` directly and therefore
+  has no timeout or `_async` counterpart.
 - Do not expose background-audio controls because they are fire-and-forget and
   event-driven.
 - Return dictionaries and lists matching the TypeScript SDK's one-shot

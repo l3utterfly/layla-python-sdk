@@ -14,6 +14,7 @@ exist for camelCase source methods, but new Python code should use snake_case.
 - [Memories and personas](#memories-and-personas)
 - [TTS and files](#tts-and-files)
 - [Execution context](#execution-context)
+- [Notifications](#notifications)
 - [Errors and runtime](#errors-and-runtime)
 
 ## Characters
@@ -155,6 +156,17 @@ lython.contextual.get_execution_context() -> dict | None
 
 The context contains `app_version`, nullable `character`, and nullable
 `session_id`. No contextual event subscriptions exist in Lython.
+
+## Notifications
+
+```python
+lython.notify(message) -> None
+```
+
+`notify` passes `message` unchanged to `lython_native.send()`. It is
+fire-and-forget: it creates no request ID, waits for no response, accepts no
+timeout, and has no `_async` counterpart. An explicit `LythonClient` exposes
+the same API as `client.notify(message)`.
 
 ## Errors and runtime
 

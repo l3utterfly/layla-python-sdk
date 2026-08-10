@@ -17,6 +17,10 @@ class FakeNative:
     def __init__(self, response: str | BaseException) -> None:
         self.response = response
         self.calls: list[tuple[str, str, float | None]] = []
+        self.notifications: list[str] = []
+
+    def send(self, message: str) -> None:
+        self.notifications.append(message)
 
     def request(self, request_id: str, message: str, timeout: float | None) -> str:
         self.calls.append((request_id, message, timeout))
@@ -26,6 +30,24 @@ class FakeNative:
 
 
 class TransportTests(unittest.TestCase):
+    def test_notify_calls_native_send_directly_without_a_request(self) -> None:
+        native = FakeNative('{"event":"unused","data":null}')
+        transport = LythonTransport(native_module=native)
+
+        result = transport.notify("Task completed")
+
+        self.assertIsNone(result)
+        self.assertEqual(native.notifications, ["Task completed"])
+        self.assertEqual(native.calls, [])
+
+    def test_notify_requires_a_string(self) -> None:
+        transport = LythonTransport(
+            native_module=FakeNative('{"event":"unused","data":null}')
+        )
+
+        with self.assertRaises(TypeError):
+            transport.notify(123)  # type: ignore[arg-type]
+
     def test_sends_typescript_message_directly_and_returns_event_data(self) -> None:
         native = FakeNative(
             '{"event":"on_get_characters_response","data":[{"id":"1"}]}'

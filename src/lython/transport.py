@@ -29,6 +29,8 @@ from .protocol import (
 class NativeModule(Protocol):
     """The subset of ``lython_native`` used by this SDK."""
 
+    def send(self, message: str) -> None: ...
+
     def request(
         self,
         request_id: str,
@@ -49,7 +51,7 @@ class OneShotResponse:
 
 
 class LythonTransport:
-    """Send concurrent, correlated one-shot requests to the Layla host."""
+    """Send one-shot requests and fire-and-forget notifications to Layla."""
 
     def __init__(
         self,
@@ -61,6 +63,32 @@ class LythonTransport:
         self.default_timeout = self._validate_timeout(default_timeout)
         self._native_module = native_module
         self._request_id_factory = request_id_factory or (lambda: uuid.uuid4().hex)
+
+    def notify(self, message: str) -> None:
+        """Send a fire-and-forget notification string directly to the host."""
+
+        if not isinstance(message, str):
+            raise TypeError("message must be a string")
+
+        native = self._get_native_module()
+        send = getattr(native, "send", None)
+        if not callable(send):
+            raise LythonNativeUnavailableError(
+                "lython_native does not expose a callable send()"
+            )
+
+        try:
+            send(message)
+        except RuntimeError as exc:
+            raise LythonExecutionError(str(exc)) from exc
+        except ValueError as exc:
+            raise LythonTransportError(str(exc)) from exc
+        except LythonTransportError:
+            raise
+        except Exception as exc:
+            raise LythonTransportError(
+                f"Native notification failed: {exc}"
+            ) from exc
 
     def request(
         self,
@@ -102,9 +130,14 @@ class LythonTransport:
         # native request ID already carries the correlation information.
         decode_layla_request(message)
         native = self._get_native_module()
+        request = getattr(native, "request", None)
+        if not callable(request):
+            raise LythonNativeUnavailableError(
+                "lython_native does not expose a callable request()"
+            )
 
         try:
-            raw_response = native.request(request_id, message, native_timeout)
+            raw_response = request(request_id, message, native_timeout)
         except TimeoutError as exc:
             raise LythonTimeoutError(
                 f"Layla request {request_id} timed out"
@@ -195,11 +228,6 @@ class LythonTransport:
                 "embedded Python execution"
             ) from exc
 
-        request = getattr(module, "request", None)
-        if not callable(request):
-            raise LythonNativeUnavailableError(
-                "lython_native does not expose a callable request()"
-            )
         self._native_module = module  # type: ignore[assignment]
         return self._native_module
 

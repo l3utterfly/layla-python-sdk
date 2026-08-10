@@ -41,6 +41,12 @@ personas = _client.personas
 tts = _client.tts
 contextual = _client.contextual
 
+
+def notify(message: str) -> None:
+    """Send a fire-and-forget notification string to the Layla host."""
+
+    _client.notify(message)
+
 __all__ = [
     "LythonError",
     "LythonExecutionError",
@@ -71,6 +77,7 @@ __all__ = [
     "encode_layla_request",
     "images",
     "memories",
+    "notify",
     "personas",
     "tts",
     "utils",

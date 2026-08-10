@@ -4,9 +4,9 @@
 Layla's embedded Python runtime. It wraps the private `lython_native` string
 transport with the existing JSON-encoded Layla WebView message format.
 
-The SDK mirrors the one-shot API surface of `@layla-network/sdk` 7.2.2. It does
-not provide streaming responses, progress events, contextual subscriptions, or
-fire-and-forget notifications.
+The SDK mirrors the one-shot API surface of `@layla-network/sdk` 7.2.2 and also
+provides a fire-and-forget host notification API. It does not provide streaming
+responses, progress events, or contextual subscriptions.
 
 ## High-level API
 
@@ -27,7 +27,16 @@ completion = lython.chat.completions.create(
     ]
 )
 text = completion["choices"][0]["message"]["content"]
+
+lython.notify("Import complete")
 ```
+
+`lython.notify(message)` passes the string directly to `lython_native.send()`
+and returns `None` as soon as the native call finishes dispatching it. It does
+not create a request ID, encode a `{cmd, data}` message, wait for a response, or
+accept a timeout. Because there is nothing to await, it has no `_async`
+counterpart. Use `client.notify(message)` when working with an explicit
+`LythonClient`.
 
 The resources are `characters`, `chat`, `classifier`, `images`, `memories`,
 `personas`, `tts`, `utils`, and `contextual`. TypeScript camelCase aliases are
