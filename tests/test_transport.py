@@ -73,6 +73,15 @@ class TransportTests(unittest.TestCase):
         )
         self.assertNotIn("protocol", json.loads(native.calls[0][1]))
 
+    def test_default_timeout_waits_indefinitely(self) -> None:
+        native = FakeNative('{"event":"done","data":null}')
+        transport = LythonTransport(native_module=native)
+
+        transport.request({"cmd": "example", "data": None}, "done")
+
+        self.assertIsNone(transport.default_timeout)
+        self.assertIsNone(native.calls[0][2])
+
     def test_request_json_preserves_caller_serialization(self) -> None:
         native = FakeNative('{"event":"done","data":null}')
         transport = LythonTransport(native_module=native)

@@ -84,7 +84,7 @@ asyncio.run(main())
 
 Async calls use a worker thread because the native request is blocking.
 Cancelling the Python task does not cancel its underlying native request; the
-native timeout still bounds that request.
+request continues until Layla responds unless an explicit timeout bounds it.
 
 The public Python API uses snake_case method names exclusively.
 
@@ -584,9 +584,9 @@ a timeout, or have an async counterpart.
 
 ## Explicit clients and timeouts
 
-Package-level resources share a default client with a 60-second timeout. Create
-an explicit client to configure another default or inject a native transport in
-tests:
+Package-level resources share a default client with no timeout, so requests wait
+indefinitely for Layla to respond. Create an explicit client to configure a
+finite default or inject a native transport in tests:
 
 ```python
 from lython import LythonClient, LythonTransport
@@ -607,8 +607,8 @@ completion = client.chat.completions.create(
 )
 ```
 
-Use `timeout=None` on the transport to allow no native deadline. Timeouts must
-otherwise be finite, non-negative numbers.
+The transport defaults to `timeout=None`, which has no native deadline. Timeouts
+must otherwise be finite, non-negative numbers.
 
 ## Low-level APIs
 
@@ -620,7 +620,7 @@ APIs are available for host integration, extensions, and testing.
 ```python
 from lython import LythonTransport
 
-transport = LythonTransport(default_timeout=60)
+transport = LythonTransport(default_timeout=None)
 response = transport.request(
     {"cmd": "get_characters", "data": {"offset": 0, "limit": 10}},
     "on_get_characters_response",

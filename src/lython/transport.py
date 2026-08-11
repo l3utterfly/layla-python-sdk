@@ -56,7 +56,7 @@ class LythonTransport:
     def __init__(
         self,
         *,
-        default_timeout: float | None = 60.0,
+        default_timeout: float | None = None,
         native_module: NativeModule | None = None,
         request_id_factory: Callable[[], str] | None = None,
     ) -> None:

@@ -4,6 +4,8 @@ This reference describes the embedded Python API. Methods are synchronous
 unless suffixed with `_async`. Every method accepts keyword-only
 `timeout: float | None`; every synchronous method has an `_async` counterpart.
 The public API uses snake_case exclusively and provides no camelCase aliases.
+Requests wait indefinitely by default; pass a finite timeout to impose a native
+deadline.
 
 ## Contents
 

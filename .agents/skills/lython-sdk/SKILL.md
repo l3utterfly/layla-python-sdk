@@ -39,7 +39,7 @@ characters = await lython.characters.list_async(timeout=60)
 ```
 
 Use `LythonClient` only when injecting a transport for tests or configuring a
-different default timeout:
+finite default timeout:
 
 ```python
 from lython import LythonClient, LythonTransport
@@ -48,9 +48,10 @@ client = LythonClient(LythonTransport(default_timeout=120))
 history = client.chat.get_chat_history("session-id")
 ```
 
-Supply a finite `timeout` when a request may take longer or shorter than the
-default 60 seconds. Cancelling an awaiting task does not cancel the underlying
-native request; its native timeout still bounds the worker thread.
+Requests wait indefinitely by default. Supply a finite `timeout` when an
+operation needs a deadline. Cancelling an awaiting task does not cancel the
+underlying native request; only an explicit native timeout bounds the worker
+thread.
 
 ## Keep chat final-only
 
