@@ -1,10 +1,9 @@
 # Lython one-shot API reference
 
-This reference describes the Python surface mirroring
-`@layla-network/sdk` 7.2.2. Methods are synchronous unless suffixed with
-`_async`. Every method accepts keyword-only `timeout: float | None`; every
-synchronous method has an `_async` counterpart. TypeScript camelCase aliases
-exist for camelCase source methods, but new Python code should use snake_case.
+This reference describes the embedded Python API. Methods are synchronous
+unless suffixed with `_async`. Every method accepts keyword-only
+`timeout: float | None`; every synchronous method has an `_async` counterpart.
+The public API uses snake_case exclusively and provides no camelCase aliases.
 
 ## Contents
 
@@ -45,7 +44,7 @@ lython.chat.get_scheduled_chat_messages() -> list[dict]
 lython.chat.cancel_scheduled_chat_message(id) -> dict
 ```
 
-Pass either a TypeScript-shaped `body` mapping or Python-style `messages=`, not
+Pass either an OpenAI-shaped `body` mapping or Python-style `messages=`, not
 both. `stream=True` raises `LythonError`. The completion shape is:
 
 ```python

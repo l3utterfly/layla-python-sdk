@@ -1,9 +1,8 @@
 """Run an end-to-end diagnostic of every unique Lython one-shot API.
 
 This script is intended to run inside Layla's embedded Python runtime.  It
-tests each underlying SDK operation once.  Async counterparts and camelCase
-aliases are intentionally not repeated because they route to the same host
-commands.
+tests each underlying SDK operation once. Async counterparts are intentionally
+not repeated because they route to the same host commands.
 
 Detailed results are printed to stdout.  Concise start, per-API progress, and
 final-summary messages are also sent to the host with ``lython.notify()``.

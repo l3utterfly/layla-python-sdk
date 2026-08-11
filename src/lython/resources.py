@@ -1,4 +1,4 @@
-"""High-level resources mirroring the one-shot Layla TypeScript SDK APIs."""
+"""High-level resources for Layla's one-shot embedded Python APIs."""
 
 from __future__ import annotations
 
@@ -149,8 +149,6 @@ class Characters(_Resource):
             raise LythonProtocolError("updated character id must be a string")
         return value
 
-    getImage = get_image
-
 
 class Classifier(_Resource):
     def get_sentiment(
@@ -180,8 +178,6 @@ class Classifier(_Resource):
             _field(result, "sentiment_values", "sentiment response"),
             "sentiment values",
         )
-
-    getSentiment = get_sentiment
 
 
 class Images(_Resource):
@@ -248,9 +244,6 @@ class Images(_Resource):
             timeout=timeout,
         )
         return result.get("image_data_base64") if isinstance(result, Mapping) else None
-
-    getImageGenerationModels = get_image_generation_models
-    generateImage = generate_image
 
 
 def _normalize_chat_message(message: Mapping[str, Any]) -> dict[str, Any]:
@@ -558,15 +551,6 @@ class Chat(_Resource):
     async def cancel_scheduled_chat_message_async(self, id: int, *, timeout: float | None = None) -> Mapping[str, Any]:
         return _mapping(await self._request_async("cancel_scheduled_chat_message", "on_cancel_scheduled_chat_message", {"id": id}, timeout=timeout), "cancel scheduled message response")
 
-    getInferenceEngines = get_inference_engines
-    setInferenceEngine = set_inference_engine
-    getChatHistory = get_chat_history
-    getChatSessions = get_chat_sessions
-    saveChatMessage = save_chat_message
-    scheduleChatMessage = schedule_chat_message
-    getScheduledChatMessages = get_scheduled_chat_messages
-    cancelScheduledChatMessage = cancel_scheduled_chat_message
-
 
 class Memories(_Resource):
     def list(self, character_id: str, offset: int = 0, range: int = 10, *, min_timestamp: int | None = None, max_timestamp: int | None = None, timeout: float | None = None) -> list[Any]:
@@ -602,9 +586,6 @@ class Memories(_Resource):
     async def create_or_update_async(self, memories: Sequence[Mapping[str, Any]], *, timeout: float | None = None) -> list[Any]:
         data = await self._request_async("create_or_update_memories", "on_create_or_update_memories_response", [dict(memory) for memory in memories], timeout=timeout)
         return _list_field(data, "memories", "saved memories response")
-
-    getTopMemories = get_top_memories
-    createOrUpdate = create_or_update
 
 
 class Personas(_Resource):
@@ -644,11 +625,6 @@ class TTS(_Resource):
     async def stop_speaking_async(self, *, timeout: float | None = None) -> None:
         await self._request_async("stop_speaking", "on_finished_speaking", None, timeout=timeout)
 
-    getVoices = get_voices
-    generateVoice = generate_voice
-    generateVoiceToFile = generate_voice_to_file
-    stopSpeaking = stop_speaking
-
 
 class Utils(_Resource):
     def save_file(self, filename: str, content_base64: str, share: bool = False, *, timeout: float | None = None) -> Mapping[str, Any]:
@@ -663,9 +639,6 @@ class Utils(_Resource):
     async def read_file_async(self, filename: str, *, timeout: float | None = None) -> Mapping[str, Any]:
         return _mapping(await self._request_async("read_file", "on_read_file_response", {"filename": filename}, timeout=timeout), "read file response")
 
-    saveFile = save_file
-    readFile = read_file
-
 
 class Contextual(_Resource):
     """One-shot context lookup only; contextual pushed events are excluded."""
@@ -678,11 +651,9 @@ class Contextual(_Resource):
         data = await self._request_async("get_execution_context", "on_get_execution_context_response", None, timeout=timeout)
         return _mapping(data, "execution context") if data is not None else None
 
-    getExecutionContext = get_execution_context
-
 
 class LythonClient:
-    """A reusable client whose resources mirror ``new LaylaSDK()``."""
+    """A reusable client providing Layla's embedded Python resources."""
 
     def __init__(self, transport: LythonTransport | None = None) -> None:
         self.transport = transport or LythonTransport()

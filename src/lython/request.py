@@ -11,7 +11,7 @@ from .transport import LythonTransport
 
 @dataclass(frozen=True, slots=True)
 class OneShotRequestTemplate:
-    """Bind a TypeScript command name to its one terminal response event."""
+    """Bind a Layla command name to its one terminal response event."""
 
     command: str
     response_event: str
@@ -57,4 +57,3 @@ class OneShotRequestTemplate:
             timeout=timeout,
         )
         return response.data
-

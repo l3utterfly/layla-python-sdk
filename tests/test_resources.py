@@ -158,9 +158,36 @@ class ResourceTests(unittest.TestCase):
         self.client.images.generate_image("portrait")
         self.assertEqual(self.native.calls[-1]["data"], {"prompt": "portrait"})
 
-    def test_typescript_method_aliases_are_available(self) -> None:
-        self.assertEqual(self.client.characters.getImage("aria"), self.client.characters.get_image("aria"))
-        self.assertEqual(self.client.chat.getInferenceEngines(), ["local"])
+    def test_camel_case_method_aliases_are_not_available(self) -> None:
+        removed_aliases = {
+            self.client.characters: ["getImage"],
+            self.client.classifier: ["getSentiment"],
+            self.client.images: ["getImageGenerationModels", "generateImage"],
+            self.client.chat: [
+                "getInferenceEngines",
+                "setInferenceEngine",
+                "getChatHistory",
+                "getChatSessions",
+                "saveChatMessage",
+                "scheduleChatMessage",
+                "getScheduledChatMessages",
+                "cancelScheduledChatMessage",
+            ],
+            self.client.memories: ["getTopMemories", "createOrUpdate"],
+            self.client.tts: [
+                "getVoices",
+                "generateVoice",
+                "generateVoiceToFile",
+                "stopSpeaking",
+            ],
+            self.client.utils: ["saveFile", "readFile"],
+            self.client.contextual: ["getExecutionContext"],
+        }
+
+        for resource, aliases in removed_aliases.items():
+            for alias in aliases:
+                with self.subTest(resource=type(resource).__name__, alias=alias):
+                    self.assertFalse(hasattr(resource, alias))
 
 
 class AsyncResourceTests(unittest.IsolatedAsyncioTestCase):

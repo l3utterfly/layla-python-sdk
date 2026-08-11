@@ -39,7 +39,7 @@ def _encode_object(value: Mapping[str, Any], description: str) -> str:
 
 
 def decode_layla_request(message: str) -> dict[str, Any]:
-    """Validate and decode an unmodified TypeScript SDK request message."""
+    """Validate and decode an unmodified Layla WebView request message."""
 
     request = _decode_object(message, "Layla request message")
     command = request.get("cmd")
@@ -59,7 +59,7 @@ def encode_layla_request(message: Mapping[str, Any]) -> str:
 
 
 def decode_layla_event(message: str) -> dict[str, Any]:
-    """Validate and decode an unmodified TypeScript SDK response event."""
+    """Validate and decode an unmodified Layla WebView response event."""
 
     event = _decode_object(message, "Layla response message")
     event_name = event.get("event")

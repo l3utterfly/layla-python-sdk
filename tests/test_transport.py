@@ -48,7 +48,7 @@ class TransportTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             transport.notify(123)  # type: ignore[arg-type]
 
-    def test_sends_typescript_message_directly_and_returns_event_data(self) -> None:
+    def test_sends_webview_message_directly_and_returns_event_data(self) -> None:
         native = FakeNative(
             '{"event":"on_get_characters_response","data":[{"id":"1"}]}'
         )

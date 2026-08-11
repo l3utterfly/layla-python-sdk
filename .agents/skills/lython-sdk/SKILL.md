@@ -80,10 +80,10 @@ one base64 image data URL at most per message.
   has no timeout or `_async` counterpart.
 - Do not expose background-audio controls because they are fire-and-forget and
   event-driven.
-- Return dictionaries and lists matching the TypeScript SDK's one-shot
-  projections; do not replace them with incompatible model classes.
-- Keep snake_case as the primary Python API. Existing camelCase aliases are for
-  TypeScript-path familiarity.
+- Return the documented dictionaries and lists; do not replace them with
+  incompatible model classes.
+- Keep the public Python API exclusively snake_case. Do not add camelCase
+  compatibility aliases.
 
 ## Handle SDK errors
 

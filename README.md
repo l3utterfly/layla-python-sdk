@@ -1,9 +1,8 @@
 # Lython SDK
 
 `lython` is the standard-library-only Python SDK for code running inside
-Layla's embedded Python runtime. It mirrors the one-shot API surface of
-`@layla-network/sdk` 7.2.2 and communicates with the Layla host through the
-private `lython_native` string transport.
+Layla's embedded Python runtime. It communicates with the Layla host through
+the private `lython_native` string transport.
 
 Real API calls only work inside an active Layla embedded Python execution.
 There is no HTTP endpoint, API key, or base URL. The package requires Python
@@ -87,31 +86,24 @@ Async calls use a worker thread because the native request is blocking.
 Cancelling the Python task does not cancel its underlying native request; the
 native timeout still bounds that request.
 
-Python code should prefer the documented snake_case names. Synchronous
-camelCase aliases are also available for methods inherited from the TypeScript
-SDK, such as `getImage`, `getChatHistory`, and `generateVoiceToFile`.
+The public Python API uses snake_case method names exclusively.
 
-### Async methods and camelCase aliases
+### Async methods
 
-This table enumerates every async resource method and every compatibility
-alias. An em dash means that the canonical method name is already identical in
-Python and TypeScript.
+This table enumerates every async resource method.
 
-| Resource | Async methods | Synchronous camelCase aliases |
-| --- | --- | --- |
-| `characters` | `list_async`, `get_image_async`, `update_async` | `getImage` |
-| `chat.completions` | `create_async` | — |
-| `chat` | `get_inference_engines_async`, `set_inference_engine_async`, `get_chat_history_async`, `get_chat_sessions_async`, `save_chat_message_async`, `schedule_chat_message_async`, `get_scheduled_chat_messages_async`, `cancel_scheduled_chat_message_async` | `getInferenceEngines`, `setInferenceEngine`, `getChatHistory`, `getChatSessions`, `saveChatMessage`, `scheduleChatMessage`, `getScheduledChatMessages`, `cancelScheduledChatMessage` |
-| `classifier` | `get_sentiment_async` | `getSentiment` |
-| `images` | `get_image_generation_models_async`, `generate_image_async` | `getImageGenerationModels`, `generateImage` |
-| `memories` | `list_async`, `get_top_memories_async`, `create_or_update_async` | `getTopMemories`, `createOrUpdate` |
-| `personas` | `get_async` | — |
-| `tts` | `get_voices_async`, `generate_voice_async`, `generate_voice_to_file_async`, `stop_speaking_async` | `getVoices`, `generateVoice`, `generateVoiceToFile`, `stopSpeaking` |
-| `utils` | `save_file_async`, `read_file_async` | `saveFile`, `readFile` |
-| `contextual` | `get_execution_context_async` | `getExecutionContext` |
-
-Compatibility aliases do not have camelCase async forms; use the canonical
-snake_case `_async` names in asyncio code.
+| Resource | Async methods |
+| --- | --- |
+| `characters` | `list_async`, `get_image_async`, `update_async` |
+| `chat.completions` | `create_async` |
+| `chat` | `get_inference_engines_async`, `set_inference_engine_async`, `get_chat_history_async`, `get_chat_sessions_async`, `save_chat_message_async`, `schedule_chat_message_async`, `get_scheduled_chat_messages_async`, `cancel_scheduled_chat_message_async` |
+| `classifier` | `get_sentiment_async` |
+| `images` | `get_image_generation_models_async`, `generate_image_async` |
+| `memories` | `list_async`, `get_top_memories_async`, `create_or_update_async` |
+| `personas` | `get_async` |
+| `tts` | `get_voices_async`, `generate_voice_async`, `generate_voice_to_file_async`, `stop_speaking_async` |
+| `utils` | `save_file_async`, `read_file_async` |
+| `contextual` | `get_execution_context_async` |
 
 ## API overview
 
@@ -222,7 +214,7 @@ The result is a final, OpenAI-shaped `chat.completion` dictionary:
 }
 ```
 
-You may instead pass a TypeScript/OpenAI-shaped body as the first argument:
+You may instead pass an OpenAI-shaped body as the first argument:
 
 ```python
 completion = lython.chat.completions.create(
