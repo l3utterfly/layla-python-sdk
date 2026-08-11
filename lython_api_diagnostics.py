@@ -4,8 +4,9 @@ This script is intended to run inside Layla's embedded Python runtime.  It
 tests each underlying SDK operation once. Async counterparts are intentionally
 not repeated because they route to the same host commands.
 
-Detailed results are printed to stdout.  Concise start, per-API progress, and
-final-summary messages are also sent to the host with ``lython.notify()``.
+Each successful API check is sent to the host with ``lython.notify()``. Failed
+checks are printed to stderr; successful and skipped checks do not write to the
+console.
 
 Some APIs necessarily have side effects.  The runner updates existing
 characters/chat messages/memories without changing their values when suitable
@@ -76,8 +77,8 @@ RESULTS: list[TestResult] = []
 NOTIFICATIONS_ENABLED = True
 
 
-def notify_progress(message: str) -> None:
-    """Notify the host without allowing progress reporting to stop the run."""
+def notify_success(message: str) -> None:
+    """Notify the host without allowing success reporting to stop the run."""
 
     global NOTIFICATIONS_ENABLED
     if not NOTIFICATIONS_ENABLED:
@@ -87,8 +88,8 @@ def notify_progress(message: str) -> None:
         lython.notify(f"{MARKER} {message}")
     except Exception as exc:
         NOTIFICATIONS_ENABLED = False
-        LOG.warning(
-            "Host progress notifications disabled after notify failed: %s: %s",
+        LOG.error(
+            "Host success notifications disabled after notify failed: %s: %s",
             type(exc).__name__,
             exc,
         )
@@ -198,7 +199,6 @@ def run_api(
     validate: Callable[[Any], None] | None = None,
 ) -> Any:
     position = len(RESULTS) + 1
-    notify_progress(f"Running {position}/{EXPECTED_API_COUNT}: {name}")
     LOG.info("RUN  %-42s | %s", name, purpose)
     started = time.monotonic()
     try:
@@ -222,6 +222,7 @@ def run_api(
     elapsed = time.monotonic() - started
     RESULTS.append(TestResult(name, "PASS", elapsed, ""))
     LOG.info("PASS %-42s | %.3fs | result=%s", name, elapsed, _format(value))
+    notify_success(f"PASS {position}/{EXPECTED_API_COUNT}: {name}")
     return value
 
 
@@ -370,8 +371,6 @@ def main() -> int:
         "This full diagnostic invokes state-changing and media APIs. See the "
         "module docstring for the side-effect policy."
     )
-    notify_progress(f"Started; running {EXPECTED_API_COUNT} API checks")
-
     context = run_api(
         "contextual.get_execution_context",
         lambda: lython.contextual.get_execution_context(timeout=DEFAULT_TIMEOUT_SECONDS),
@@ -706,10 +705,6 @@ def main() -> int:
             len(RESULTS),
         )
         failed += 1
-    notify_progress(
-        f"Complete: {passed} PASS, {failed} FAIL, {skipped} SKIP, "
-        f"{len(RESULTS)} TOTAL"
-    )
     if failed:
         LOG.error("Diagnostic completed with failures. Search above for 'FAIL'.")
     elif skipped:
@@ -724,10 +719,10 @@ def main() -> int:
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.ERROR,
         format="%(asctime)s.%(msecs)03dZ %(levelname)-7s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
-        stream=sys.stdout,
+        stream=sys.stderr,
         force=True,
     )
     logging.Formatter.converter = time.gmtime
