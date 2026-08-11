@@ -1,8 +1,9 @@
-# Lython SDK
+# Layla Python SDK
 
-`lython` is the standard-library-only Python SDK for code running inside
-Layla's embedded Python runtime. It communicates with the Layla host through
-the private `lython_native` string transport.
+`layla-python-sdk` is the standard-library-only Python SDK distribution for
+code running inside Layla's embedded Python runtime. It is imported as
+`lython` and communicates with the Layla host through the private
+`lython_native` string transport.
 
 Real API calls only work inside an active Layla embedded Python execution.
 There is no HTTP endpoint, API key, or base URL. The package requires Python
@@ -10,6 +11,7 @@ There is no HTTP endpoint, API key, or base URL. The package requires Python
 
 ## Contents
 
+- [Installation](#installation)
 - [Quick start](#quick-start)
 - [API conventions](#api-conventions)
 - [API overview](#api-overview)
@@ -32,6 +34,16 @@ There is no HTTP endpoint, API key, or base URL. The package requires Python
 - [Runtime limitations](#runtime-limitations)
 - [Host integration](#host-integration)
 - [Development and releases](#development-and-releases)
+
+## Installation
+
+Install the `layla-python-sdk` distribution from PyPI:
+
+```console
+pip install layla-python-sdk
+```
+
+The distribution is imported in Python as `lython`.
 
 ## Quick start
 
