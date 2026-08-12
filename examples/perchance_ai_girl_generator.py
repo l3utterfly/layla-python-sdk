@@ -2,14 +2,14 @@
 
 Unlike ``perchance_image_generation.py`` (which calls Perchance's HTTP API from
 inside the page), this example drives the visible generator UI on
-https://perchance.org/improved-ai-girl-generator: it clicks the on-page
-"✨ generate" button and waits for the result image to appear, then reads the
-image straight out of the DOM.
+https://perchance.org/improved-ai-girl-generator: it types a prompt into the
+description field, clicks the on-page "✨ generate" button, waits for the result
+image to appear, then reads the image straight out of the DOM.
 
-The catch that makes this interesting: the generator's button and its result
-image live inside nested, cross-origin iframes that the top document cannot
-reach through the DOM. So every read/click here goes through the all-frames
-helpers, which fan out across every frame:
+The catch that makes this interesting: the generator's prompt field, button, and
+result image live inside nested, cross-origin iframes that the top document
+cannot reach through the DOM. So every read/fill/click here goes through the
+all-frames helpers, which fan out across every frame:
 
   - ``page.wait_for_function_all_frames(expr)`` polls ``expr`` in every frame
     from the host side until one frame returns a truthy value. We use it both to
@@ -37,13 +37,46 @@ import lython
 
 URL = "https://perchance.org/improved-ai-girl-generator"
 
+# Hardcoded for now; a future step will let the caller supply this.
+PROMPT = (
+    "a stunning ginger haired Scandinavian woman wearing a casual dress, "
+    "posing in her living room, aged 30 years old, natural lighting, "
+    "photorealistic"
+)
+
 _NAV_TIMEOUT_MS = 30_000
-# Let the page (and its generator iframe) hydrate before we look for the button.
+# Let the page (and its generator iframe) hydrate before we look for the fields.
 _SETTLE_TIMEOUT_MS = 5_000
 # The generator iframe can take a moment to appear after load.
-_BUTTON_TIMEOUT_MS = 30_000
+_FIELD_TIMEOUT_MS = 30_000
 # Generation time is highly variable on the free tier.
 _GENERATE_TIMEOUT_MS = 180_000
+
+# Locate the prompt textarea by its stable data-name, preferring the one whose
+# onkeyup wires Enter to the generate button (disambiguates if a generator ever
+# has more than one "description" field).
+_FILL_PROMPT_JS = """
+(prompt) => {
+  const fields = Array.from(
+    document.querySelectorAll('textarea[data-name="description"]')
+  );
+  const el = fields.find(
+    (t) => /generate/i.test(t.getAttribute('onkeyup') || '')
+  ) || fields[0];
+  if (!el) return false;
+  el.focus();
+  // Set via the native setter so any framework value tracking sees the change,
+  // then fire a real input event so the page's oninput handler captures it.
+  const descriptor = Object.getOwnPropertyDescriptor(
+    HTMLTextAreaElement.prototype, 'value'
+  );
+  if (descriptor && descriptor.set) descriptor.set.call(el, prompt);
+  else el.value = prompt;
+  el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  return true;
+}
+"""
 
 # Locate the generate button by its stable id, falling back to a button whose
 # text reads "generate" (the id/styles can change; the label does not).
@@ -110,12 +143,24 @@ def _first_image(frames: list[lython.FrameResult]) -> dict[str, Any]:
     raise PerchanceError("result image was reported ready but no frame returned it")
 
 
-def generate_to_file() -> str:
+def generate_to_file(prompt: str = PROMPT) -> str:
     """Run one generation on the page and save the result image to a temp file."""
     lython.notify(f"Loading {URL} ...")
     lython.page.goto(URL, timeout=_NAV_TIMEOUT_MS)
     lython.page.wait_for_load_state("load", timeout=_NAV_TIMEOUT_MS)
     lython.page.wait_for_timeout(_SETTLE_TIMEOUT_MS)
+
+    # Wait-and-fill in one step: the probe fills the textarea and returns true the
+    # first time it appears, so polling stops after a single fill.
+    lython.notify("Entering the prompt ...")
+    filled = lython.page.wait_for_function_all_frames(
+        _FILL_PROMPT_JS,
+        prompt,
+        polling_ms=500,
+        timeout=_FIELD_TIMEOUT_MS,
+    )
+    if not any(frame.content is True for frame in filled):
+        raise PerchanceError("could not find the prompt textarea in any frame")
 
     # Wait-and-click in one step: the probe clicks the button and returns true the
     # first time it finds it, so polling stops after a single click.
@@ -123,7 +168,7 @@ def generate_to_file() -> str:
     clicked = lython.page.wait_for_function_all_frames(
         _GENERATE_BUTTON_JS,
         polling_ms=500,
-        timeout=_BUTTON_TIMEOUT_MS,
+        timeout=_FIELD_TIMEOUT_MS,
     )
     if not any(frame.content is True for frame in clicked):
         raise PerchanceError("could not find the generate button in any frame")
