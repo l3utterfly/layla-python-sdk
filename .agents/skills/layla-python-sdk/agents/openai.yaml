@@ -1,0 +1,4 @@
+interface:
+  display_name: "Layla Python SDK"
+  short_description: "Build one-shot Lython scripts with the Python Layla SDK"
+  default_prompt: "Use $layla-python-sdk to implement a Lython script with the correct one-shot Layla APIs."
