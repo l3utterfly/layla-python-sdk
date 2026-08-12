@@ -120,8 +120,8 @@ This table enumerates every async resource method.
 | `tts` | `get_voices_async`, `generate_voice_async`, `generate_voice_to_file_async`, `stop_speaking_async` |
 | `utils` | `save_file_async`, `read_file_async` |
 | `contextual` | `get_execution_context_async` |
-| `page` | `goto_async`, `evaluate_async`, `content_async`, `title_async`, `wait_for_function_async`, `wait_for_timeout_async`, `wait_for_selector_async`, `click_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `is_visible_async` |
-| `locator` | `wait_for_async`, `click_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `input_value_async`, `is_visible_async`, `count_async`, `all_text_contents_async` |
+| `page` | `goto_async`, `evaluate_async`, `content_async`, `title_async`, `wait_for_url_async`, `wait_for_load_state_async`, `wait_for_function_async`, `wait_for_timeout_async`, `wait_for_selector_async`, `click_async`, `press_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `is_visible_async` |
+| `locator` | `wait_for_async`, `click_async`, `press_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `input_value_async`, `is_visible_async`, `count_async`, `all_text_contents_async` |
 
 ## API overview
 
@@ -599,17 +599,14 @@ APIs; it does not create a browser process or expose remote element handles.
 
 ```python
 import lython
+from urllib.parse import urlencode
 
 final_url = lython.page.goto("https://example.com", timeout=30_000)
+title = lython.page.evaluate("() => document.title")
 
-text = lython.page.evaluate(
-    """selector => {
-        const element = document.querySelector(selector);
-        element.click();
-        return element.textContent;
-    }""",
-    ".submit",
-)
+search_url = "https://example.com/search?" + urlencode({"q": "Layla"})
+lython.page.goto(search_url, timeout=30_000)
+lython.page.locator('a[href*="section=news"]').click(timeout=30_000)
 ```
 
 `evaluate(expression, arg)` follows Playwright's calling form. If the
@@ -618,6 +615,18 @@ its result. Omitting `arg` is distinct from explicitly passing `None`. Arguments
 and results must be JSON serializable; JavaScript `undefined` returns `None`.
 Browser timeouts are milliseconds. Omitting one uses the host controller's
 default watchdog (currently 30 seconds); zero disables that host watchdog.
+Raw `evaluate()` deliberately does not infer or wait for navigation.
+
+`wait_for_url()` accepts Playwright-style `*`, `**`, and `?` glob patterns and
+is race-safe: it checks the current loaded URL before waiting for a future
+top-frame load. `wait_for_load_state()` currently supports the WebView's
+observable `"load"` state.
+
+When a search or filter has a stable GET-style URL, construct that URL with
+`urllib.parse.urlencode()` and call `goto()` instead of filling a form and
+submitting it. This removes an unnecessary interaction and its associated
+navigation race. Use locator actions for state that is only reachable from the
+loaded page, such as selecting a results vertical or tab.
 
 ### Page and locator helpers
 
@@ -632,11 +641,17 @@ print(items.count())
 print(items.all_text_contents())
 ```
 
-Page helpers include `content`, `title`, `wait_for_function`,
-`wait_for_timeout`, `wait_for_selector`, `click`, `fill`, `text_content`,
-`inner_text`, `inner_html`, `get_attribute`, and `is_visible`. A locator adds
-`wait_for`, `input_value`, `count`, and `all_text_contents`. Locator operations
-re-query their CSS selector each time.
+Page helpers include `content`, `title`, `wait_for_url`, `wait_for_load_state`,
+`wait_for_function`, `wait_for_timeout`, `wait_for_selector`, `click`, `press`,
+`fill`, `text_content`, `inner_text`, `inner_html`, `get_attribute`, and
+`is_visible`. A locator adds `wait_for`, `input_value`, `count`, and
+`all_text_contents`. Locator operations re-query their CSS selector each time.
+
+Locator `click()` and `press()` arm a top-frame navigation watcher before the
+action and wait for any navigation they initiate. Pass `no_wait_after=True` to
+opt out. Selector/function waits are retried after a document replacement while
+preserving their original overall timeout; arbitrary evaluations are never
+replayed because they may have side effects.
 
 Selector waits execute inside the WebView with page-side timers; React Native
 does not poll across the bridge. Supported states are `attached`, `detached`,

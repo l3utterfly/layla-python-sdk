@@ -169,6 +169,8 @@ timeout can still end the request.
 
 ```python
 lython.page.goto(url, timeout=None) -> str
+lython.page.wait_for_url(url, wait_until="load", timeout=None) -> None
+lython.page.wait_for_load_state(state="load", timeout=None) -> None
 lython.page.evaluate(expression, arg=<omitted>, timeout=None) -> JSON value
 lython.page.content(timeout=None) -> str
 lython.page.title(timeout=None) -> str
@@ -182,10 +184,12 @@ lython.page.wait_for_selector(
 lython.page.locator(selector) -> Locator
 ```
 
-Page selector helpers are `click`, `fill`, `text_content`, `inner_text`,
+Page selector helpers are `click`, `press`, `fill`, `text_content`, `inner_text`,
 `inner_html`, `get_attribute`, and `is_visible`. Locators provide `wait_for`,
 the same action/read helpers, plus `input_value`, `count`, and
-`all_text_contents`. Every host-calling method has an `_async` counterpart.
+`all_text_contents`. `click` and `press` accept `no_wait_after: bool | None` and
+wait for navigation by default. Every host-calling method has an `_async`
+counterpart.
 
 `evaluate` uses Playwright's expression-and-argument form. An omitted argument
 invokes a function with no argument; explicit `None` becomes JavaScript `null`.
@@ -193,9 +197,18 @@ The expression may return a Promise. Arguments and results must be JSON values,
 and JavaScript `undefined` is normalized to `None`. DOM nodes and other remote
 handles must be projected to plain data within the expression.
 
+`wait_for_url` accepts `*`, `**`, and `?` glob patterns and checks the current
+loaded URL before observing future top-frame loads. `wait_for_load_state`
+currently supports `"load"`. Raw `evaluate` does not wait for navigation.
+
 `wait_for_selector` and locator actions wait inside the WebView rather than
 polling through React Native. Supported states are `attached`, `detached`,
-`visible`, and `hidden`.
+`visible`, and `hidden`. Selector and function waits retry after a document is
+replaced while preserving the original overall timeout.
+
+For a stable GET-style search or filter endpoint, build the URL with
+`urllib.parse.urlencode()` and navigate directly instead of filling and
+submitting a form. Use locator actions for page-only state such as a results tab.
 
 ## Notifications
 

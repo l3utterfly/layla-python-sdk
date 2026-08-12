@@ -22,10 +22,46 @@ class BrowserNative:
         if request["cmd"] == "webview_navigate":
             event = "on_webview_navigate_response"
             data = {"url": "https://example.com/final"}
+        elif request["cmd"] == "webview_wait_for_url":
+            event = "on_webview_wait_for_url_response"
+            data = {"url": "https://example.com/final"}
+        elif request["cmd"] == "webview_wait_for_load_state":
+            event = "on_webview_wait_for_load_state_response"
+            data = {"state": "load", "url": "https://example.com/final"}
         else:
             event = "on_webview_evaluate_response"
             data = {"value": self.next_value}
         return json.dumps({"event": event, "data": data}, separators=(",", ":"))
+
+
+class NavigationRaceNative(BrowserNative):
+    def __init__(self) -> None:
+        super().__init__()
+        self.evaluation_count = 0
+
+    def request(self, request_id: str, message: str, timeout: float | None) -> str:
+        request = json.loads(message)
+        if request["cmd"] != "webview_evaluate":
+            return super().request(request_id, message, timeout)
+
+        self.calls.append((request, timeout))
+        self.evaluation_count += 1
+        if self.evaluation_count == 1:
+            return json.dumps(
+                {
+                    "event": "on_error",
+                    "data": {
+                        "code": "webview_context_destroyed",
+                        "message": "document replaced",
+                        "retryable": True,
+                    },
+                },
+                separators=(",", ":"),
+            )
+        return json.dumps(
+            {"event": "on_webview_evaluate_response", "data": {"value": True}},
+            separators=(",", ":"),
+        )
 
 
 class BrowserTests(unittest.TestCase):
@@ -85,6 +121,29 @@ class BrowserTests(unittest.TestCase):
         )
         self.assertIsNone(native_timeout)
 
+    def test_navigation_waits_use_lifecycle_protocol(self) -> None:
+        self.page.wait_for_url("**/search**", timeout=2_500)
+        request, native_timeout = self.last_call()
+        self.assertEqual(
+            request,
+            {
+                "cmd": "webview_wait_for_url",
+                "data": {
+                    "url": "**/search**",
+                    "wait_until": "load",
+                    "timeout_ms": 2500.0,
+                },
+            },
+        )
+        self.assertEqual(native_timeout, 3.5)
+
+        self.page.wait_for_load_state()
+        request, _ = self.last_call()
+        self.assertEqual(
+            request,
+            {"cmd": "webview_wait_for_load_state", "data": {"state": "load"}},
+        )
+
     def test_locator_actions_are_built_on_raw_evaluate(self) -> None:
         locator = self.page.locator(".submit")
         self.assertEqual(repr(locator), "Locator('.submit')")
@@ -98,7 +157,18 @@ class BrowserTests(unittest.TestCase):
         )
         self.assertIn("document.querySelector", request["data"]["expression"])
         self.assertEqual(request["data"]["timeout_ms"], 1000.0)
+        self.assertTrue(request["data"]["wait_for_navigation"])
         self.assertEqual(native_timeout, 2.0)
+
+        locator.click(no_wait_after=True)
+        request, _ = self.last_call()
+        self.assertNotIn("wait_for_navigation", request["data"])
+
+        locator.press("Enter")
+        request, _ = self.last_call()
+        self.assertEqual(request["data"]["argument"]["action"], "press")
+        self.assertEqual(request["data"]["argument"]["key"], "Enter")
+        self.assertTrue(request["data"]["wait_for_navigation"])
 
         locator.fill("Send")
         request, _ = self.last_call()
@@ -155,6 +225,21 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(argument["argument"], {"ready": True})
         self.assertEqual(argument["polling"], 25.0)
 
+    def test_retryable_wait_survives_document_replacement(self) -> None:
+        native = NavigationRaceNative()
+        page = LythonClient(LythonTransport(native_module=native)).page
+
+        self.assertTrue(page.wait_for_function("() => true", timeout=2_000))
+
+        self.assertEqual(
+            [request["cmd"] for request, _ in native.calls],
+            [
+                "webview_evaluate",
+                "webview_wait_for_load_state",
+                "webview_evaluate",
+            ],
+        )
+
     def test_wait_for_timeout_runs_inside_the_page(self) -> None:
         self.page.wait_for_timeout(250)
 
@@ -185,6 +270,10 @@ class BrowserTests(unittest.TestCase):
             self.page.locator("div").wait_for(state="ready")  # type: ignore[arg-type]
         with self.assertRaises(TypeError):
             self.page.locator("input").fill(3)  # type: ignore[arg-type]
+        with self.assertRaises(ValueError):
+            self.page.wait_for_load_state("networkidle")  # type: ignore[arg-type]
+        with self.assertRaises(TypeError):
+            self.page.locator("button").click(no_wait_after="yes")  # type: ignore[arg-type]
 
         self.assertEqual(self.native.calls, [])
 

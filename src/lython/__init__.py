@@ -1,6 +1,6 @@
 """Layla's standard-library-only SDK for the embedded Lython runtime."""
 
-from .browser import Locator, Page, SelectorState
+from .browser import LoadState, Locator, Page, SelectorState
 from .errors import (
     LythonError,
     LythonExecutionError,
@@ -59,6 +59,7 @@ __all__ = [
     "LythonTimeoutError",
     "LythonTransport",
     "LythonTransportError",
+    "LoadState",
     "Locator",
     "OneShotRequestTemplate",
     "OneShotResponse",

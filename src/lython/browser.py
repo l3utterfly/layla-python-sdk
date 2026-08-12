@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from .errors import LythonProtocolError
+from .errors import LythonHostError, LythonProtocolError
 from .transport import LythonTransport
 
 _OMITTED = object()
 
 SelectorState = Literal["attached", "detached", "visible", "hidden"]
+LoadState = Literal["load"]
+
+_DEFAULT_TIMEOUT_MS = 30_000.0
 
 _LOCATOR_ACTION_EXPRESSION = r"""
-async ({ selector, action, value, name, state }) => {
+async ({ selector, action, value, name, state, key }) => {
   const isVisible = (element) => {
     if (!element) return false;
     const style = window.getComputedStyle(element);
@@ -65,7 +69,9 @@ async ({ selector, action, value, name, state }) => {
     return null;
   }
 
-  const requiredState = action === 'click' || action === 'fill' ? 'visible' : 'attached';
+  const requiredState = action === 'click' || action === 'fill' || action === 'press'
+    ? 'visible'
+    : 'attached';
   const element = await waitForState(requiredState);
 
   if (action === 'click') {
@@ -91,6 +97,19 @@ async ({ selector, action, value, name, state }) => {
     }
     element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
     element.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    return null;
+  }
+  if (action === 'press') {
+    await waitFor(() => isEnabled(element));
+    element.focus();
+    const eventOptions = { key, bubbles: true, cancelable: true, composed: true };
+    const shouldContinue = element.dispatchEvent(new KeyboardEvent('keydown', eventOptions));
+    element.dispatchEvent(new KeyboardEvent('keypress', eventOptions));
+    element.dispatchEvent(new KeyboardEvent('keyup', eventOptions));
+    if (shouldContinue && key === 'Enter') {
+      const form = element.form || element.closest?.('form');
+      if (form) form.requestSubmit();
+    }
     return null;
   }
   if (action === 'text_content') return element.textContent;
@@ -160,6 +179,23 @@ def _native_timeout_seconds(timeout_ms: float | None) -> float | None:
     return timeout_ms / 1000 + 1
 
 
+def _deadline_for_timeout(timeout_ms: float | None) -> float | None:
+    if timeout_ms == 0:
+        return None
+    effective_timeout = _DEFAULT_TIMEOUT_MS if timeout_ms is None else timeout_ms
+    return time.monotonic() + effective_timeout / 1000
+
+
+def _remaining_timeout_ms(deadline: float | None) -> float:
+    if deadline is None:
+        return 0.0
+    return max(0.0, (deadline - time.monotonic()) * 1000)
+
+
+def _is_retryable_context_error(error: LythonHostError) -> bool:
+    return error.retryable and error.code == "webview_context_destroyed"
+
+
 def _response_field(data: Any, key: str, description: str) -> Any:
     if not isinstance(data, Mapping) or key not in data:
         raise LythonProtocolError(f"{description} must contain {key!r}")
@@ -212,6 +248,86 @@ class Page:
             raise LythonProtocolError("WebView navigation response url must be a string")
         return final_url
 
+    def wait_for_url(
+        self,
+        url: str,
+        *,
+        wait_until: LoadState = "load",
+        timeout: float | None = None,
+    ) -> None:
+        """Wait for the current or a future main-frame URL to match *url*."""
+
+        url = _validate_non_empty_string(url, "url")
+        self._validate_load_state(wait_until, "wait_until")
+        timeout_ms = _validate_timeout_ms(timeout)
+        data: dict[str, Any] = {"url": url, "wait_until": wait_until}
+        if timeout_ms is not None:
+            data["timeout_ms"] = timeout_ms
+        self._transport.request(
+            {"cmd": "webview_wait_for_url", "data": data},
+            "on_webview_wait_for_url_response",
+            timeout=_native_timeout_seconds(timeout_ms),
+        )
+
+    async def wait_for_url_async(
+        self,
+        url: str,
+        *,
+        wait_until: LoadState = "load",
+        timeout: float | None = None,
+    ) -> None:
+        """Async counterpart of :meth:`wait_for_url`."""
+
+        url = _validate_non_empty_string(url, "url")
+        self._validate_load_state(wait_until, "wait_until")
+        timeout_ms = _validate_timeout_ms(timeout)
+        data: dict[str, Any] = {"url": url, "wait_until": wait_until}
+        if timeout_ms is not None:
+            data["timeout_ms"] = timeout_ms
+        await self._transport.request_async(
+            {"cmd": "webview_wait_for_url", "data": data},
+            "on_webview_wait_for_url_response",
+            timeout=_native_timeout_seconds(timeout_ms),
+        )
+
+    def wait_for_load_state(
+        self,
+        state: LoadState = "load",
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Wait for the current document to reach *state*."""
+
+        self._validate_load_state(state, "state")
+        timeout_ms = _validate_timeout_ms(timeout)
+        data: dict[str, Any] = {"state": state}
+        if timeout_ms is not None:
+            data["timeout_ms"] = timeout_ms
+        self._transport.request(
+            {"cmd": "webview_wait_for_load_state", "data": data},
+            "on_webview_wait_for_load_state_response",
+            timeout=_native_timeout_seconds(timeout_ms),
+        )
+
+    async def wait_for_load_state_async(
+        self,
+        state: LoadState = "load",
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Async counterpart of :meth:`wait_for_load_state`."""
+
+        self._validate_load_state(state, "state")
+        timeout_ms = _validate_timeout_ms(timeout)
+        data: dict[str, Any] = {"state": state}
+        if timeout_ms is not None:
+            data["timeout_ms"] = timeout_ms
+        await self._transport.request_async(
+            {"cmd": "webview_wait_for_load_state", "data": data},
+            "on_webview_wait_for_load_state_response",
+            timeout=_native_timeout_seconds(timeout_ms),
+        )
+
     def evaluate(
         self,
         expression: str,
@@ -221,19 +337,7 @@ class Page:
     ) -> Any:
         """Evaluate JavaScript using Playwright's ``evaluate(expression, arg)`` form."""
 
-        expression = _validate_non_empty_string(expression, "expression")
-        timeout_ms = _validate_timeout_ms(timeout)
-        data: dict[str, Any] = {"expression": expression}
-        if arg is not _OMITTED:
-            data["argument"] = arg
-        if timeout_ms is not None:
-            data["timeout_ms"] = timeout_ms
-        response = self._transport.request(
-            {"cmd": "webview_evaluate", "data": data},
-            "on_webview_evaluate_response",
-            timeout=_native_timeout_seconds(timeout_ms),
-        ).data
-        return _response_field(response, "value", "WebView evaluation response")
+        return self._evaluate(expression, arg, timeout=timeout, wait_for_navigation=False)
 
     async def evaluate_async(
         self,
@@ -244,6 +348,18 @@ class Page:
     ) -> Any:
         """Async counterpart of :meth:`evaluate`."""
 
+        return await self._evaluate_async(
+            expression, arg, timeout=timeout, wait_for_navigation=False
+        )
+
+    def _evaluate(
+        self,
+        expression: str,
+        arg: Any = _OMITTED,
+        *,
+        timeout: float | None,
+        wait_for_navigation: bool,
+    ) -> Any:
         expression = _validate_non_empty_string(expression, "expression")
         timeout_ms = _validate_timeout_ms(timeout)
         data: dict[str, Any] = {"expression": expression}
@@ -251,6 +367,32 @@ class Page:
             data["argument"] = arg
         if timeout_ms is not None:
             data["timeout_ms"] = timeout_ms
+        if wait_for_navigation:
+            data["wait_for_navigation"] = True
+        response = self._transport.request(
+            {"cmd": "webview_evaluate", "data": data},
+            "on_webview_evaluate_response",
+            timeout=_native_timeout_seconds(timeout_ms),
+        ).data
+        return _response_field(response, "value", "WebView evaluation response")
+
+    async def _evaluate_async(
+        self,
+        expression: str,
+        arg: Any = _OMITTED,
+        *,
+        timeout: float | None,
+        wait_for_navigation: bool,
+    ) -> Any:
+        expression = _validate_non_empty_string(expression, "expression")
+        timeout_ms = _validate_timeout_ms(timeout)
+        data: dict[str, Any] = {"expression": expression}
+        if arg is not _OMITTED:
+            data["argument"] = arg
+        if timeout_ms is not None:
+            data["timeout_ms"] = timeout_ms
+        if wait_for_navigation:
+            data["wait_for_navigation"] = True
         response = await self._transport.request_async(
             {"cmd": "webview_evaluate", "data": data},
             "on_webview_evaluate_response",
@@ -298,7 +440,9 @@ class Page:
         timeout: float | None = None,
     ) -> Any:
         payload = self._wait_for_function_payload(expression, arg, polling)
-        return self.evaluate(_WAIT_FOR_FUNCTION_EXPRESSION, payload, timeout=timeout)
+        return self._evaluate_retrying_navigation(
+            _WAIT_FOR_FUNCTION_EXPRESSION, payload, timeout=timeout
+        )
 
     async def wait_for_function_async(
         self,
@@ -309,7 +453,7 @@ class Page:
         timeout: float | None = None,
     ) -> Any:
         payload = self._wait_for_function_payload(expression, arg, polling)
-        return await self.evaluate_async(
+        return await self._evaluate_retrying_navigation_async(
             _WAIT_FOR_FUNCTION_EXPRESSION, payload, timeout=timeout
         )
 
@@ -353,11 +497,49 @@ class Page:
         await locator.wait_for_async(state=state, timeout=timeout)
         return None if state in ("hidden", "detached") else locator
 
-    def click(self, selector: str, *, timeout: float | None = None) -> None:
-        self.locator(selector).click(timeout=timeout)
+    def click(
+        self,
+        selector: str,
+        *,
+        timeout: float | None = None,
+        no_wait_after: bool | None = None,
+    ) -> None:
+        self.locator(selector).click(timeout=timeout, no_wait_after=no_wait_after)
 
-    async def click_async(self, selector: str, *, timeout: float | None = None) -> None:
-        await self.locator(selector).click_async(timeout=timeout)
+    async def click_async(
+        self,
+        selector: str,
+        *,
+        timeout: float | None = None,
+        no_wait_after: bool | None = None,
+    ) -> None:
+        await self.locator(selector).click_async(
+            timeout=timeout, no_wait_after=no_wait_after
+        )
+
+    def press(
+        self,
+        selector: str,
+        key: str,
+        *,
+        timeout: float | None = None,
+        no_wait_after: bool | None = None,
+    ) -> None:
+        self.locator(selector).press(
+            key, timeout=timeout, no_wait_after=no_wait_after
+        )
+
+    async def press_async(
+        self,
+        selector: str,
+        key: str,
+        *,
+        timeout: float | None = None,
+        no_wait_after: bool | None = None,
+    ) -> None:
+        await self.locator(selector).press_async(
+            key, timeout=timeout, no_wait_after=no_wait_after
+        )
 
     def fill(self, selector: str, value: str, *, timeout: float | None = None) -> None:
         self.locator(selector).fill(value, timeout=timeout)
@@ -403,6 +585,64 @@ class Page:
     async def is_visible_async(self, selector: str, *, timeout: float | None = None) -> bool:
         return await self.locator(selector).is_visible_async(timeout=timeout)
 
+    def _evaluate_retrying_navigation(
+        self,
+        expression: str,
+        arg: Any,
+        *,
+        timeout: float | None,
+    ) -> Any:
+        timeout_ms = _validate_timeout_ms(timeout)
+        deadline = _deadline_for_timeout(timeout_ms)
+        while True:
+            remaining = _remaining_timeout_ms(deadline)
+            attempt_timeout = 0.0 if deadline is None else remaining
+            try:
+                return self._evaluate(
+                    expression,
+                    arg,
+                    timeout=attempt_timeout,
+                    wait_for_navigation=False,
+                )
+            except LythonHostError as error:
+                remaining = _remaining_timeout_ms(deadline)
+                if not _is_retryable_context_error(error) or (
+                    deadline is not None and remaining <= 0
+                ):
+                    raise
+                self.wait_for_load_state(
+                    timeout=0.0 if deadline is None else remaining
+                )
+
+    async def _evaluate_retrying_navigation_async(
+        self,
+        expression: str,
+        arg: Any,
+        *,
+        timeout: float | None,
+    ) -> Any:
+        timeout_ms = _validate_timeout_ms(timeout)
+        deadline = _deadline_for_timeout(timeout_ms)
+        while True:
+            remaining = _remaining_timeout_ms(deadline)
+            attempt_timeout = 0.0 if deadline is None else remaining
+            try:
+                return await self._evaluate_async(
+                    expression,
+                    arg,
+                    timeout=attempt_timeout,
+                    wait_for_navigation=False,
+                )
+            except LythonHostError as error:
+                remaining = _remaining_timeout_ms(deadline)
+                if not _is_retryable_context_error(error) or (
+                    deadline is not None and remaining <= 0
+                ):
+                    raise
+                await self.wait_for_load_state_async(
+                    timeout=0.0 if deadline is None else remaining
+                )
+
     @staticmethod
     def _wait_for_function_payload(
         expression: str,
@@ -420,6 +660,11 @@ class Page:
             "argument": None if arg is _OMITTED else arg,
             "polling": polling,
         }
+
+    @staticmethod
+    def _validate_load_state(state: str, name: str) -> None:
+        if state != "load":
+            raise ValueError(f"{name} must be 'load'")
 
 
 class Locator:
@@ -450,11 +695,59 @@ class Locator:
         self._validate_state(state)
         await self._action_async("wait", state=state, timeout=timeout)
 
-    def click(self, *, timeout: float | None = None) -> None:
-        self._action("click", timeout=timeout)
+    def click(
+        self,
+        *,
+        timeout: float | None = None,
+        no_wait_after: bool | None = None,
+    ) -> None:
+        self._validate_no_wait_after(no_wait_after)
+        self._action(
+            "click", timeout=timeout, wait_for_navigation=no_wait_after is not True
+        )
 
-    async def click_async(self, *, timeout: float | None = None) -> None:
-        await self._action_async("click", timeout=timeout)
+    async def click_async(
+        self,
+        *,
+        timeout: float | None = None,
+        no_wait_after: bool | None = None,
+    ) -> None:
+        self._validate_no_wait_after(no_wait_after)
+        await self._action_async(
+            "click", timeout=timeout, wait_for_navigation=no_wait_after is not True
+        )
+
+    def press(
+        self,
+        key: str,
+        *,
+        timeout: float | None = None,
+        no_wait_after: bool | None = None,
+    ) -> None:
+        key = _validate_non_empty_string(key, "key")
+        self._validate_no_wait_after(no_wait_after)
+        self._action(
+            "press",
+            key=key,
+            timeout=timeout,
+            wait_for_navigation=no_wait_after is not True,
+        )
+
+    async def press_async(
+        self,
+        key: str,
+        *,
+        timeout: float | None = None,
+        no_wait_after: bool | None = None,
+    ) -> None:
+        key = _validate_non_empty_string(key, "key")
+        self._validate_no_wait_after(no_wait_after)
+        await self._action_async(
+            "press",
+            key=key,
+            timeout=timeout,
+            wait_for_navigation=no_wait_after is not True,
+        )
 
     def fill(self, value: str, *, timeout: float | None = None) -> None:
         if not isinstance(value, str):
@@ -548,20 +841,44 @@ class Locator:
             raise LythonProtocolError("locator all_text_contents result must be a string list")
         return value
 
-    def _action(self, action: str, *, timeout: float | None = None, **data: Any) -> Any:
-        return self._page.evaluate(
+    def _action(
+        self,
+        action: str,
+        *,
+        timeout: float | None = None,
+        wait_for_navigation: bool = False,
+        **data: Any,
+    ) -> Any:
+        argument = {"selector": self.selector, "action": action, **data}
+        if action == "wait":
+            return self._page._evaluate_retrying_navigation(
+                _LOCATOR_ACTION_EXPRESSION, argument, timeout=timeout
+            )
+        return self._page._evaluate(
             _LOCATOR_ACTION_EXPRESSION,
-            {"selector": self.selector, "action": action, **data},
+            argument,
             timeout=timeout,
+            wait_for_navigation=wait_for_navigation,
         )
 
     async def _action_async(
-        self, action: str, *, timeout: float | None = None, **data: Any
+        self,
+        action: str,
+        *,
+        timeout: float | None = None,
+        wait_for_navigation: bool = False,
+        **data: Any,
     ) -> Any:
-        return await self._page.evaluate_async(
+        argument = {"selector": self.selector, "action": action, **data}
+        if action == "wait":
+            return await self._page._evaluate_retrying_navigation_async(
+                _LOCATOR_ACTION_EXPRESSION, argument, timeout=timeout
+            )
+        return await self._page._evaluate_async(
             _LOCATOR_ACTION_EXPRESSION,
-            {"selector": self.selector, "action": action, **data},
+            argument,
             timeout=timeout,
+            wait_for_navigation=wait_for_navigation,
         )
 
     def _string_action(self, action: str, timeout: float | None) -> str:
@@ -581,5 +898,10 @@ class Locator:
         if state not in ("attached", "detached", "visible", "hidden"):
             raise ValueError("state must be 'attached', 'detached', 'visible', or 'hidden'")
 
+    @staticmethod
+    def _validate_no_wait_after(value: bool | None) -> None:
+        if value is not None and not isinstance(value, bool):
+            raise TypeError("no_wait_after must be a boolean or None")
 
-__all__ = ["Locator", "Page", "SelectorState"]
+
+__all__ = ["LoadState", "Locator", "Page", "SelectorState"]

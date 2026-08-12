@@ -55,6 +55,36 @@ not cancel the underlying native request; only an explicit native timeout
 bounds the worker thread. WebView operations have an independent host watchdog
 described below.
 
+## Keep embedded-script output executor-friendly
+
+Treat stdout as the result channel consumed by the calling LLM. Print the final
+successful result in a concise, self-contained format such as JSON or clearly
+labeled Markdown. Send progress updates, selector diagnostics, and other debug
+information through `lython.notify(message)`. Reserve stderr exclusively for
+genuine errors that prevent the script from producing its result.
+
+Never call `sys.exit()`, `exit()`, or raise `SystemExit` in a Lython script.
+Layla's embedded executor treats `SystemExit`, including `SystemExit(0)`, as an
+execution error and can discard the successful stdout result. On an expected
+failure, print an actionable error to stderr and return normally. Let an
+unexpected exception propagate only when the caller needs the execution to be
+reported as failed.
+
+```python
+import json
+import sys
+
+import lython
+
+lython.notify("Starting task")
+try:
+    result = run_task()
+except ExpectedTaskError as error:
+    print(f"Task failed: {error}", file=sys.stderr, flush=True)
+else:
+    print(json.dumps(result, ensure_ascii=False))
+```
+
 ## Automate Layla's WebView
 
 Use the package-level `lython.page` for Layla's single host-owned automation
@@ -92,10 +122,33 @@ items = lython.page.locator(".result-item")
 texts = items.all_text_contents()
 ```
 
-Available helpers include navigation, HTML/title reads, clicks, fills, text and
-HTML reads, attributes, input values, visibility, counts, selector waits,
-function waits, and timeout waits. Use the `_async` counterpart in asyncio
-workflows. Locator operations re-query their CSS selector for every call.
+Prefer direct navigation when a search or filter is represented by a stable
+GET-style URL. Encode parameters instead of manually concatenating user input,
+then use locator actions only for state that must be selected in the page:
+
+```python
+from urllib.parse import urlencode
+
+search_url = "https://www.google.com/search?" + urlencode({"hl": "en", "q": query})
+lython.page.goto(search_url, timeout=30_000)
+lython.page.locator('a[href*="tbm=nws"], a[href*="udm=5"]').click(timeout=30_000)
+```
+
+Do not fill and submit a search form merely to reach the same deterministic
+URL. If the site does not expose stable URL parameters, use `fill()` plus
+`click()` or `press()` normally.
+
+Available helpers include navigation, URL/load-state waits, HTML/title reads,
+clicks, key presses, fills, text and HTML reads, attributes, input values,
+visibility, counts, selector waits, function waits, and timeout waits. Use the
+`_async` counterpart in asyncio workflows. Locator operations re-query their
+CSS selector for every call.
+
+Keep `evaluate()` navigation-unaware. Locator `click()` and `press()` arm the
+host navigation watcher unless `no_wait_after=True`. Use `wait_for_url()` when
+the destination matters. Selector and function waits retry across document
+replacement within their original overall timeout; never replay arbitrary
+evaluations because they may have side effects.
 
 Browser timeouts use Playwright's millisecond convention, unlike ordinary
 Lython resource timeouts, which use seconds. Selector and function waits run as
