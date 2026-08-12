@@ -1,6 +1,6 @@
 ---
 name: lython-sdk
-description: Use the project-local `lython` Python SDK to call Layla's embedded one-shot APIs. Trigger when writing, reviewing, testing, or debugging Python that imports `lython`; building Lython scripts or agents; or accessing Layla characters, final chat completions, inference engines, chat history and schedules, sentiment, image generation, memories, personas, TTS, private files, or execution context. Do not use for the TypeScript `@layla-network/sdk`, React Native host implementation, streaming responses, contextual event subscriptions, background audio, or unrelated Python work.
+description: Use the project-local `lython` Python SDK to call Layla's embedded one-shot APIs and automate Layla's host-owned WebView. Trigger when writing, reviewing, testing, or debugging Python that imports `lython`; building Lython scripts or agents; using `lython.page`, Playwright-like page or locator helpers, JavaScript evaluation, DOM automation, navigation, clicks, fills, or page-side waits; or accessing Layla characters, final chat completions, inference engines, chat history and schedules, sentiment, image generation, memories, personas, TTS, private files, or execution context. Do not use for the TypeScript `@layla-network/sdk`, React Native host/controller implementation, streaming responses, contextual event subscriptions, background audio, or unrelated Python work.
 ---
 
 # Lython SDK
@@ -13,8 +13,9 @@ private `lython_native` module or raw protocol messages.
 
 1. Read [references/api.md](references/api.md) before choosing method signatures,
    return fields, or chat/image input shapes.
-2. Treat `src/lython/resources.py` and `src/lython/__init__.py` as the source of
-   truth if the reference and implementation differ.
+2. Treat `src/lython/resources.py`, `src/lython/browser.py`, and
+   `src/lython/__init__.py` as the source of truth if the reference and
+   implementation differ.
 3. Check `README.md` for the current host-side one-shot response contract when
    diagnosing integration behavior.
 4. Preserve the existing `{cmd, data}` wire payloads. Do not invent HTTP
@@ -48,10 +49,60 @@ client = LythonClient(LythonTransport(default_timeout=120))
 history = client.chat.get_chat_history("session-id")
 ```
 
-Requests wait indefinitely by default. Supply a finite `timeout` when an
-operation needs a deadline. Cancelling an awaiting task does not cancel the
-underlying native request; only an explicit native timeout bounds the worker
-thread.
+Ordinary resource requests wait indefinitely by default. Supply a finite
+`timeout` when an operation needs a deadline. Cancelling an awaiting task does
+not cancel the underlying native request; only an explicit native timeout
+bounds the worker thread. WebView operations have an independent host watchdog
+described below.
+
+## Automate Layla's WebView
+
+Use the package-level `lython.page` for Layla's single host-owned automation
+WebView. Do not create a browser process, use Playwright itself, call
+`lython_native` directly, or construct raw `{cmd, data}` messages when the
+high-level API covers the operation.
+
+Use raw evaluation when custom DOM logic is needed. Its calling form matches
+Playwright's `page.evaluate(expression, arg)`:
+
+```python
+import lython
+
+lython.page.goto("https://example.com", timeout=30_000)
+text = lython.page.evaluate(
+    "selector => document.querySelector(selector)?.textContent",
+    ".result",
+)
+```
+
+An omitted argument is distinct from explicit `None`. The expression may
+return a Promise, which the host awaits. Arguments and results must be JSON
+serializable; JavaScript `undefined` becomes Python `None`. Project DOM nodes,
+functions, and other JavaScript objects to plain data before returning because
+Lython does not expose remote JS or element handles.
+
+Prefer `Page` and `Locator` helpers for common operations:
+
+```python
+lython.page.fill("input[name=email]", "user@example.com")
+lython.page.click("button[type=submit]")
+lython.page.wait_for_selector(".result", state="visible", timeout=10_000)
+
+items = lython.page.locator(".result-item")
+texts = items.all_text_contents()
+```
+
+Available helpers include navigation, HTML/title reads, clicks, fills, text and
+HTML reads, attributes, input values, visibility, counts, selector waits,
+function waits, and timeout waits. Use the `_async` counterpart in asyncio
+workflows. Locator operations re-query their CSS selector for every call.
+
+Browser timeouts use Playwright's millisecond convention, unlike ordinary
+Lython resource timeouts, which use seconds. Selector and function waits run as
+Promises inside the WebView; do not implement Python-side or React Native-side
+polling. An omitted browser timeout uses the host watchdog, currently 30
+seconds, and zero disables that host watchdog. A configured native transport
+timeout remains independent.
 
 ## Keep chat final-only
 
