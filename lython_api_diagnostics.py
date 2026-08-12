@@ -15,6 +15,7 @@ clearly marked diagnostic record because the corresponding create/update API
 cannot otherwise be exercised.  The scheduled message is cancelled during the
 same run.  The first listed inference engine is selected, which may change the
 current engine.  There is no delete API for the small private diagnostic file.
+The host-owned automation WebView is navigated to ``about:blank`` near the end.
 """
 
 from __future__ import annotations
@@ -44,7 +45,8 @@ from lython import (
 DEFAULT_TIMEOUT_SECONDS = 60.0
 GENERATION_TIMEOUT_SECONDS = 300.0
 TTS_TIMEOUT_SECONDS = 180.0
-EXPECTED_API_COUNT = 26
+BROWSER_TIMEOUT_MS = 60_000.0
+EXPECTED_API_COUNT = 28
 
 # Set this to True when using the script from a test harness that relies on a
 # non-zero exit code.  False is friendlier to Layla's interactive runner.
@@ -258,6 +260,11 @@ def require_result_id(value: Any) -> None:
 def require_nonempty_list(value: Any, description: str) -> None:
     if not isinstance(value, list) or not value:
         raise APIReportedFailure(f"{description} was empty or not a list: {_format(value)}")
+
+
+def require_mapping(value: Any, description: str) -> None:
+    if not isinstance(value, Mapping):
+        raise APIReportedFailure(f"{description} was not an object: {_format(value)}")
 
 
 def require_data_uri(value: Any, media_type: str, description: str) -> None:
@@ -684,6 +691,22 @@ def main() -> int:
         ),
         purpose="Read back the private diagnostic file.",
         validate=validate_read_file,
+    )
+
+    run_api(
+        "page.goto",
+        lambda: lython.page.goto("about:blank", timeout=BROWSER_TIMEOUT_MS),
+        purpose="Navigate the host-owned automation WebView to a safe blank document.",
+        validate=lambda value: require_nonempty_string(value, "Final WebView URL"),
+    )
+    run_api(
+        "page.evaluate",
+        lambda: lython.page.evaluate(
+            "() => ({ url: location.href, title: document.title })",
+            timeout=BROWSER_TIMEOUT_MS,
+        ),
+        purpose="Evaluate JavaScript and return plain JSON from the automation WebView.",
+        validate=lambda value: require_mapping(value, "WebView evaluation result"),
     )
 
     passed = sum(result.status == "PASS" for result in RESULTS)

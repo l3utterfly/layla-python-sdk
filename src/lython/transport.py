@@ -163,9 +163,20 @@ class LythonTransport:
                 if isinstance(data, dict) and isinstance(data.get("message"), str)
                 else "Layla host request failed"
             )
+            host_code = (
+                data.get("code")
+                if isinstance(data, dict) and isinstance(data.get("code"), str)
+                else "layla_api_error"
+            )
+            details = data.get("details") if isinstance(data, dict) else None
+            retryable = (
+                data.get("retryable") is True if isinstance(data, dict) else False
+            )
             raise LythonHostError(
                 host_message,
-                code="layla_api_error",
+                code=host_code,
+                details=details,
+                retryable=retryable,
                 raw_message=raw_response,
             )
 

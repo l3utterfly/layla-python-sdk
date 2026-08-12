@@ -1,11 +1,11 @@
 # Lython one-shot API reference
 
 This reference describes the embedded Python API. Methods are synchronous
-unless suffixed with `_async`. Every method accepts keyword-only
-`timeout: float | None`; every synchronous method has an `_async` counterpart.
-The public API uses snake_case exclusively and provides no camelCase aliases.
-Requests wait indefinitely by default; pass a finite timeout to impose a native
-deadline.
+unless suffixed with `_async`. Ordinary resource methods accept keyword-only
+`timeout: float | None`; every host-calling synchronous method has an `_async`
+counterpart. The public API uses snake_case exclusively and provides no
+camelCase aliases. Requests wait indefinitely by default; pass a finite timeout
+to impose a native deadline.
 
 ## Contents
 
@@ -15,6 +15,7 @@ deadline.
 - [Memories and personas](#memories-and-personas)
 - [TTS and files](#tts-and-files)
 - [Execution context](#execution-context)
+- [WebView automation](#webview-automation)
 - [Notifications](#notifications)
 - [Errors and runtime](#errors-and-runtime)
 
@@ -157,6 +158,44 @@ lython.contextual.get_execution_context() -> dict | None
 
 The context contains `app_version`, nullable `character`, and nullable
 `session_id`. No contextual event subscriptions exist in Lython.
+
+## WebView automation
+
+The package-level `lython.page` and `LythonClient.page` control Layla's single
+host-owned WebView. Browser API timeouts use milliseconds, matching Playwright.
+An omitted timeout uses the host's default watchdog (currently 30 seconds), and
+zero disables the host watchdog. A separately configured native transport
+timeout can still end the request.
+
+```python
+lython.page.goto(url, timeout=None) -> str
+lython.page.evaluate(expression, arg=<omitted>, timeout=None) -> JSON value
+lython.page.content(timeout=None) -> str
+lython.page.title(timeout=None) -> str
+lython.page.wait_for_function(
+    expression, arg=<omitted>, polling="raf", timeout=None
+) -> JSON value
+lython.page.wait_for_timeout(timeout) -> None
+lython.page.wait_for_selector(
+    selector, state="visible", timeout=None
+) -> Locator | None
+lython.page.locator(selector) -> Locator
+```
+
+Page selector helpers are `click`, `fill`, `text_content`, `inner_text`,
+`inner_html`, `get_attribute`, and `is_visible`. Locators provide `wait_for`,
+the same action/read helpers, plus `input_value`, `count`, and
+`all_text_contents`. Every host-calling method has an `_async` counterpart.
+
+`evaluate` uses Playwright's expression-and-argument form. An omitted argument
+invokes a function with no argument; explicit `None` becomes JavaScript `null`.
+The expression may return a Promise. Arguments and results must be JSON values,
+and JavaScript `undefined` is normalized to `None`. DOM nodes and other remote
+handles must be projected to plain data within the expression.
+
+`wait_for_selector` and locator actions wait inside the WebView rather than
+polling through React Native. Supported states are `attached`, `detached`,
+`visible`, and `hidden`.
 
 ## Notifications
 

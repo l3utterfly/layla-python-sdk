@@ -27,6 +27,7 @@ There is no HTTP endpoint, API key, or base URL. The package requires Python
 - [Text to speech](#text-to-speech)
 - [Private files](#private-files)
 - [Execution context](#execution-context)
+- [WebView automation](#webview-automation)
 - [Notifications](#notifications)
 - [Explicit clients and timeouts](#explicit-clients-and-timeouts)
 - [Low-level APIs](#low-level-apis)
@@ -69,14 +70,17 @@ lython.notify(f"Layla answered: {answer}")
 ## API conventions
 
 The package-level resources are `characters`, `chat`, `classifier`, `images`,
-`memories`, `personas`, `tts`, `utils`, and `contextual`.
+`memories`, `personas`, `tts`, `utils`, `contextual`, and `page`.
 
-Every one-shot resource method:
+Every ordinary one-shot resource method:
 
 - is synchronous by default;
 - accepts a keyword-only `timeout: float | None` argument;
 - has an async counterpart with an `_async` suffix; and
 - returns ordinary dictionaries, lists, strings, or `None`.
+
+Ordinary Layla API timeouts are measured in seconds. `page` and `locator`
+timeouts use Playwright's millisecond convention.
 
 For example:
 
@@ -116,6 +120,8 @@ This table enumerates every async resource method.
 | `tts` | `get_voices_async`, `generate_voice_async`, `generate_voice_to_file_async`, `stop_speaking_async` |
 | `utils` | `save_file_async`, `read_file_async` |
 | `contextual` | `get_execution_context_async` |
+| `page` | `goto_async`, `evaluate_async`, `content_async`, `title_async`, `wait_for_function_async`, `wait_for_timeout_async`, `wait_for_selector_async`, `click_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `is_visible_async` |
+| `locator` | `wait_for_async`, `click_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `input_value_async`, `is_visible_async`, `count_async`, `all_text_contents_async` |
 
 ## API overview
 
@@ -133,11 +139,13 @@ This table enumerates every async resource method.
 | `tts` | `get_voices`, `generate_voice`, `generate_voice_to_file`, `stop_speaking` | Voice data, file result, or `None` |
 | `utils` | `save_file`, `read_file` | Private-file result |
 | `contextual` | `get_execution_context` | Execution context or `None` |
+| `page` | `goto`, `evaluate`, `content`, `title`, waits, and selector helpers | JSON values and page data |
+| `locator` | waits, actions, text, attributes, visibility, and counts | JSON-compatible element data |
 | Package/client | `notify` | `None` (fire-and-forget) |
 
-The sections below document all 27 high-level operations. Add `_async` to any
-one-shot method name and `await` it to use its async counterpart. `notify` is
-the only exception because it does not wait for a response.
+The sections below document the high-level operations. Add `_async` to a
+host-calling method name and `await` it to use its async counterpart. `notify`
+is the exception because it does not wait for a response.
 
 ## Characters
 
@@ -581,6 +589,59 @@ if context is not None:
 The context contains `app_version`, nullable `character`, and nullable
 `session_id`. Contextual event subscriptions are intentionally not exposed.
 
+## WebView automation
+
+`lython.page` controls the WebView owned by the active Layla Python screen. It
+implements a JSON-only subset of Playwright's synchronous `Page` and `Locator`
+APIs; it does not create a browser process or expose remote element handles.
+
+### Navigation and raw evaluation
+
+```python
+import lython
+
+final_url = lython.page.goto("https://example.com", timeout=30_000)
+
+text = lython.page.evaluate(
+    """selector => {
+        const element = document.querySelector(selector);
+        element.click();
+        return element.textContent;
+    }""",
+    ".submit",
+)
+```
+
+`evaluate(expression, arg)` follows Playwright's calling form. If the
+expression evaluates to a function, the host invokes it with `arg` and awaits
+its result. Omitting `arg` is distinct from explicitly passing `None`. Arguments
+and results must be JSON serializable; JavaScript `undefined` returns `None`.
+Browser timeouts are milliseconds. Omitting one uses the host controller's
+default watchdog (currently 30 seconds); zero disables that host watchdog.
+
+### Page and locator helpers
+
+```python
+lython.page.fill("input[name=email]", "user@example.com")
+lython.page.click("button[type=submit]")
+lython.page.wait_for_selector(".result", state="visible", timeout=10_000)
+print(lython.page.text_content(".result"))
+
+items = lython.page.locator(".result-item")
+print(items.count())
+print(items.all_text_contents())
+```
+
+Page helpers include `content`, `title`, `wait_for_function`,
+`wait_for_timeout`, `wait_for_selector`, `click`, `fill`, `text_content`,
+`inner_text`, `inner_html`, `get_attribute`, and `is_visible`. A locator adds
+`wait_for`, `input_value`, `count`, and `all_text_contents`. Locator operations
+re-query their CSS selector each time.
+
+Selector waits execute inside the WebView with page-side timers; React Native
+does not poll across the bridge. Supported states are `attached`, `detached`,
+`visible`, and `hidden`. Every operation has an `_async` counterpart.
+
 ## Notifications
 
 ### `notify`
@@ -609,6 +670,9 @@ client = LythonClient(transport)
 history = client.chat.get_chat_history("session-id")
 client.notify("History loaded")
 ```
+
+The WebView controller has its own independent watchdog as described in
+[WebView automation](#webview-automation).
 
 A per-call timeout overrides the transport default:
 
@@ -775,6 +839,8 @@ except LythonHostError as error:
 - Context is a one-shot lookup; contextual `on`/`off` subscriptions are absent.
 - Background-audio controls are absent because they are fire-and-forget and
   event-driven.
+- WebView evaluation is JSON-only. DOM nodes, functions, cyclic objects, and
+  other remote JavaScript handles cannot cross the bridge.
 - `notify` is the intentional fire-and-forget exception and has no timeout or
   async form.
 

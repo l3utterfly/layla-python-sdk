@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .browser import Page
 from .errors import LythonError, LythonProtocolError
 from .transport import LythonTransport
 
@@ -666,6 +667,7 @@ class LythonClient:
         self.personas = Personas(self.transport)
         self.tts = TTS(self.transport)
         self.contextual = Contextual(self.transport)
+        self.page = Page(self.transport)
 
     def notify(self, message: str) -> None:
         """Send a fire-and-forget notification string to the Layla host."""

@@ -103,6 +103,26 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), "Model unavailable")
         self.assertEqual(caught.exception.code, "layla_api_error")
 
+    def test_on_error_preserves_rich_webview_error_fields(self) -> None:
+        native = FakeNative(
+            '{"event":"on_error","data":{'
+            '"message":"Evaluation timed out",'
+            '"code":"webview_evaluation_timeout",'
+            '"details":{"url":"https://example.com"},'
+            '"retryable":true}}'
+        )
+        transport = LythonTransport(native_module=native)
+
+        with self.assertRaises(LythonHostError) as caught:
+            transport.request(
+                {"cmd": "webview_evaluate", "data": {"expression": "() => 1"}},
+                "on_webview_evaluate_response",
+            )
+
+        self.assertEqual(caught.exception.code, "webview_evaluation_timeout")
+        self.assertEqual(caught.exception.details, {"url": "https://example.com"})
+        self.assertTrue(caught.exception.retryable)
+
     def test_unexpected_terminal_event_is_protocol_error(self) -> None:
         native = FakeNative('{"event":"wrong_event","data":null}')
         transport = LythonTransport(native_module=native)

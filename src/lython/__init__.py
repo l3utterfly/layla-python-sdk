@@ -1,5 +1,6 @@
 """Layla's standard-library-only SDK for the embedded Lython runtime."""
 
+from .browser import Locator, Page, SelectorState
 from .errors import (
     LythonError,
     LythonExecutionError,
@@ -40,6 +41,7 @@ memories = _client.memories
 personas = _client.personas
 tts = _client.tts
 contextual = _client.contextual
+page = _client.page
 
 
 def notify(message: str) -> None:
@@ -57,8 +59,11 @@ __all__ = [
     "LythonTimeoutError",
     "LythonTransport",
     "LythonTransportError",
+    "Locator",
     "OneShotRequestTemplate",
     "OneShotResponse",
+    "Page",
+    "SelectorState",
     "Chat",
     "Characters",
     "Classifier",
@@ -78,6 +83,7 @@ __all__ = [
     "images",
     "memories",
     "notify",
+    "page",
     "personas",
     "tts",
     "utils",
