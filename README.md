@@ -120,7 +120,7 @@ This table enumerates every async resource method.
 | `tts` | `get_voices_async`, `generate_voice_async`, `generate_voice_to_file_async`, `stop_speaking_async` |
 | `utils` | `save_file_async`, `read_file_async` |
 | `contextual` | `get_execution_context_async` |
-| `page` | `goto_async`, `evaluate_async`, `content_async`, `title_async`, `wait_for_url_async`, `wait_for_load_state_async`, `wait_for_function_async`, `wait_for_timeout_async`, `wait_for_selector_async`, `click_async`, `press_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `is_visible_async` |
+| `page` | `goto_async`, `evaluate_async`, `evaluate_all_frames_async`, `frames_content_async`, `content_async`, `title_async`, `wait_for_url_async`, `wait_for_load_state_async`, `wait_for_function_async`, `wait_for_function_all_frames_async`, `wait_for_timeout_async`, `wait_for_selector_async`, `click_async`, `press_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `is_visible_async` |
 | `locator` | `wait_for_async`, `click_async`, `press_async`, `fill_async`, `text_content_async`, `inner_text_async`, `inner_html_async`, `get_attribute_async`, `input_value_async`, `is_visible_async`, `count_async`, `all_text_contents_async` |
 
 ## API overview
@@ -656,6 +656,41 @@ replayed because they may have side effects.
 Selector waits execute inside the WebView with page-side timers; React Native
 does not poll across the bridge. Supported states are `attached`, `detached`,
 `visible`, and `hidden`. Every operation has an `_async` counterpart.
+
+`wait_for_timeout`, by contrast, sleeps on the host (like Playwright's
+driver-side wait) rather than in the page — the WebView keeps running while it
+waits. A page-side timer would be broadcast to every frame and could be inflated
+or timed out by an unresponsive frame.
+
+### All-frames helpers
+
+`evaluate()` and the locator/selector helpers observe only the **top document**.
+For content that lives inside a nested (often cross-origin) iframe — which the
+top frame cannot reach through the DOM — use the all-frames helpers, which fan
+the evaluation out across every frame and return one result per frame:
+
+```python
+# One result per frame (top document first, then every nested iframe).
+for frame in lython.page.frames_content():
+    print(frame.url, len(frame.content or ""))
+
+results = lython.page.evaluate_all_frames("() => document.title")
+
+# Poll a probe across all frames until one frame returns a truthy value. The
+# probe must return immediately (it is polled from the host side), which is what
+# lets it observe conditions inside iframes the top frame cannot see.
+lython.page.wait_for_function_all_frames(
+    "() => { const i = document.getElementById('resultImgEl');"
+    " return i && (i.src || '').startsWith('data:image') ? i.src.length : 0; }",
+    polling_ms=1_000,
+    timeout=180_000,
+)
+```
+
+Each result is a `FrameResult(url, content, error)`; `content` is `None` and
+`error` is populated when that frame's evaluation raised (e.g. a sandboxed
+iframe). `wait_for_function_all_frames` raises `LythonTimeoutError` if no frame
+matches before the timeout. All three have `_async` counterparts.
 
 ## Notifications
 

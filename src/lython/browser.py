@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
-from .errors import LythonHostError, LythonProtocolError
+from .errors import LythonHostError, LythonProtocolError, LythonTimeoutError
 from .transport import LythonTransport
 
 _OMITTED = object()
@@ -16,6 +18,31 @@ SelectorState = Literal["attached", "detached", "visible", "hidden"]
 LoadState = Literal["load"]
 
 _DEFAULT_TIMEOUT_MS = 30_000.0
+
+
+@dataclass(frozen=True)
+class FrameError:
+    """The error a frame's evaluation raised, when ``FrameResult.error`` is set."""
+
+    name: str
+    message: str
+
+
+@dataclass(frozen=True)
+class FrameResult:
+    """Result of evaluating an expression in a single frame.
+
+    ``webview_evaluate`` runs the expression in every frame of the document (the
+    top frame plus all nested iframes, including cross-origin ones), so a single
+    call yields one :class:`FrameResult` per frame, depth-first from the top.
+    """
+
+    #: ``location.href`` of the frame that produced this result.
+    url: str
+    #: The frame's evaluation result (JSON value), or ``None`` if it raised.
+    content: Any
+    #: Present when the frame's evaluation raised; ``content`` is then ``None``.
+    error: FrameError | None = None
 
 _LOCATOR_ACTION_EXPRESSION = r"""
 async ({ selector, action, value, name, state, key }) => {
@@ -152,9 +179,6 @@ async ({ expression, hasArgument, argument, polling }) => {
 }
 """
 
-_WAIT_FOR_TIMEOUT_EXPRESSION = "milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))"
-
-
 def _validate_non_empty_string(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise TypeError(f"{name} must be a non-empty string")
@@ -200,6 +224,59 @@ def _response_field(data: Any, key: str, description: str) -> Any:
     if not isinstance(data, Mapping) or key not in data:
         raise LythonProtocolError(f"{description} must contain {key!r}")
     return data[key]
+
+
+def _parse_frame_results(value: Any) -> list[FrameResult]:
+    """Parse the per-frame array a ``webview_evaluate`` response now carries."""
+
+    if not isinstance(value, list):
+        raise LythonProtocolError(
+            "WebView evaluation response value must be a list of frame results"
+        )
+    frames: list[FrameResult] = []
+    for item in value:
+        if not isinstance(item, Mapping) or "url" not in item or "content" not in item:
+            raise LythonProtocolError(
+                "each WebView frame result must contain 'url' and 'content'"
+            )
+        url = item["url"]
+        if not isinstance(url, str):
+            raise LythonProtocolError("WebView frame result 'url' must be a string")
+        raw_error = item.get("error")
+        error: FrameError | None = None
+        if raw_error is not None:
+            if not isinstance(raw_error, Mapping):
+                raise LythonProtocolError("WebView frame result 'error' must be an object")
+            error = FrameError(
+                name=str(raw_error.get("name", "Error")),
+                message=str(raw_error.get("message", "")),
+            )
+        frames.append(FrameResult(url=url, content=item["content"], error=error))
+    return frames
+
+
+def _top_frame_content(frames: list[FrameResult]) -> Any:
+    """Reduce the per-frame array to the top frame's value for scalar callers.
+
+    The bootstrap emits the frame where evaluation started (the top frame) first,
+    so ``frames[0]`` is the top document. This preserves Playwright-style single
+    value semantics for :meth:`Page.evaluate`, :meth:`Page.content`, locators, and
+    friends, while :meth:`Page.evaluate_all_frames` exposes every frame. An empty
+    array (e.g. an action settled by navigation before any frame replied) reads as
+    ``None``, and a top-frame error is re-raised like the old on_error path.
+    """
+
+    if not frames:
+        return None
+    top = frames[0]
+    if top.error is not None:
+        raise LythonHostError(
+            top.error.message or "WebView evaluation failed",
+            code="webview_evaluation_error",
+            details={"name": top.error.name},
+            retryable=False,
+        )
+    return top.content
 
 
 class Page:
@@ -352,6 +429,40 @@ class Page:
             expression, arg, timeout=timeout, wait_for_navigation=False
         )
 
+    def evaluate_all_frames(
+        self,
+        expression: str,
+        arg: Any = _OMITTED,
+        *,
+        timeout: float | None = None,
+    ) -> list[FrameResult]:
+        """Evaluate *expression* in every frame and return one result per frame.
+
+        Unlike :meth:`evaluate`, which returns only the top document's value, this
+        returns a :class:`FrameResult` for the top frame and every nested iframe
+        (including cross-origin ones the top document cannot reach through the
+        DOM), depth-first from the top. It is up to the caller to decide which
+        frames to use — e.g. filter by ``url`` or ignore frames whose ``content``
+        is empty.
+        """
+
+        return self._evaluate_frames(
+            expression, arg, timeout=timeout, wait_for_navigation=False
+        )
+
+    async def evaluate_all_frames_async(
+        self,
+        expression: str,
+        arg: Any = _OMITTED,
+        *,
+        timeout: float | None = None,
+    ) -> list[FrameResult]:
+        """Async counterpart of :meth:`evaluate_all_frames`."""
+
+        return await self._evaluate_frames_async(
+            expression, arg, timeout=timeout, wait_for_navigation=False
+        )
+
     def _evaluate(
         self,
         expression: str,
@@ -360,6 +471,32 @@ class Page:
         timeout: float | None,
         wait_for_navigation: bool,
     ) -> Any:
+        frames = self._evaluate_frames(
+            expression, arg, timeout=timeout, wait_for_navigation=wait_for_navigation
+        )
+        return _top_frame_content(frames)
+
+    async def _evaluate_async(
+        self,
+        expression: str,
+        arg: Any = _OMITTED,
+        *,
+        timeout: float | None,
+        wait_for_navigation: bool,
+    ) -> Any:
+        frames = await self._evaluate_frames_async(
+            expression, arg, timeout=timeout, wait_for_navigation=wait_for_navigation
+        )
+        return _top_frame_content(frames)
+
+    def _evaluate_frames(
+        self,
+        expression: str,
+        arg: Any = _OMITTED,
+        *,
+        timeout: float | None,
+        wait_for_navigation: bool,
+    ) -> list[FrameResult]:
         expression = _validate_non_empty_string(expression, "expression")
         timeout_ms = _validate_timeout_ms(timeout)
         data: dict[str, Any] = {"expression": expression}
@@ -374,16 +511,17 @@ class Page:
             "on_webview_evaluate_response",
             timeout=_native_timeout_seconds(timeout_ms),
         ).data
-        return _response_field(response, "value", "WebView evaluation response")
+        value = _response_field(response, "value", "WebView evaluation response")
+        return _parse_frame_results(value)
 
-    async def _evaluate_async(
+    async def _evaluate_frames_async(
         self,
         expression: str,
         arg: Any = _OMITTED,
         *,
         timeout: float | None,
         wait_for_navigation: bool,
-    ) -> Any:
+    ) -> list[FrameResult]:
         expression = _validate_non_empty_string(expression, "expression")
         timeout_ms = _validate_timeout_ms(timeout)
         data: dict[str, Any] = {"expression": expression}
@@ -398,7 +536,8 @@ class Page:
             "on_webview_evaluate_response",
             timeout=_native_timeout_seconds(timeout_ms),
         )
-        return _response_field(response.data, "value", "WebView evaluation response")
+        value = _response_field(response.data, "value", "WebView evaluation response")
+        return _parse_frame_results(value)
 
     def locator(self, selector: str) -> Locator:
         """Create a reusable CSS locator without querying the page yet."""
@@ -418,6 +557,26 @@ class Page:
         if not isinstance(value, str):
             raise LythonProtocolError("page content must be a string")
         return value
+
+    def frames_content(self, *, timeout: float | None = None) -> list[FrameResult]:
+        """Return the ``outerHTML`` of every frame as :class:`FrameResult` values.
+
+        Convenience over :meth:`evaluate_all_frames`: each result's ``content`` is
+        that frame's serialized HTML (or ``None`` if the frame errored).
+        """
+
+        return self.evaluate_all_frames(
+            "() => document.documentElement.outerHTML", timeout=timeout
+        )
+
+    async def frames_content_async(
+        self, *, timeout: float | None = None
+    ) -> list[FrameResult]:
+        """Async counterpart of :meth:`frames_content`."""
+
+        return await self.evaluate_all_frames_async(
+            "() => document.documentElement.outerHTML", timeout=timeout
+        )
 
     def title(self, *, timeout: float | None = None) -> str:
         value = self.evaluate("() => document.title", timeout=timeout)
@@ -457,23 +616,119 @@ class Page:
             _WAIT_FOR_FUNCTION_EXPRESSION, payload, timeout=timeout
         )
 
+    def wait_for_function_all_frames(
+        self,
+        expression: str,
+        arg: Any = _OMITTED,
+        *,
+        polling_ms: float = 250.0,
+        timeout: float | None = None,
+    ) -> list[FrameResult]:
+        """Poll *expression* across every frame until one returns a truthy value.
+
+        Returns the full per-frame result list once at least one frame's
+        ``content`` is truthy (and not an error). Unlike :meth:`wait_for_function`,
+        which polls *inside* each frame and can only observe the top document,
+        this polls from the host side — so ``expression`` must return immediately
+        (a probe, not a blocking wait) and it can observe conditions inside
+        cross-origin iframes the top frame cannot reach.
+
+        Raises :class:`LythonTimeoutError` if no frame matches before *timeout*
+        (Playwright's default of 30s when omitted; ``0`` waits indefinitely).
+        """
+
+        timeout_ms = _validate_timeout_ms(timeout)
+        interval_ms = _validate_timeout_ms(polling_ms) or 0.0
+        deadline = _deadline_for_timeout(timeout_ms)
+        while True:
+            attempt_timeout = 0.0 if deadline is None else max(_remaining_timeout_ms(deadline), 1.0)
+            try:
+                frames = self._evaluate_frames(
+                    expression, arg, timeout=attempt_timeout, wait_for_navigation=False
+                )
+            except LythonHostError as error:
+                if not _is_retryable_context_error(error) or (
+                    deadline is not None and _remaining_timeout_ms(deadline) <= 0
+                ):
+                    raise
+                frames = []
+            if any(frame.error is None and frame.content for frame in frames):
+                return frames
+            if deadline is not None and _remaining_timeout_ms(deadline) <= 0:
+                raise LythonTimeoutError(
+                    "wait_for_function_all_frames timed out before any frame matched"
+                )
+            if interval_ms > 0:
+                wait = interval_ms
+                if deadline is not None:
+                    wait = min(wait, _remaining_timeout_ms(deadline))
+                if wait > 0:
+                    # Sleep on the host, not via wait_for_timeout(): the latter
+                    # broadcasts a setTimeout to every frame and would inherit the
+                    # all-frames aggregate delay, timing out on a slow/unresponsive
+                    # frame during generation.
+                    time.sleep(wait / 1000)
+
+    async def wait_for_function_all_frames_async(
+        self,
+        expression: str,
+        arg: Any = _OMITTED,
+        *,
+        polling_ms: float = 250.0,
+        timeout: float | None = None,
+    ) -> list[FrameResult]:
+        """Async counterpart of :meth:`wait_for_function_all_frames`."""
+
+        timeout_ms = _validate_timeout_ms(timeout)
+        interval_ms = _validate_timeout_ms(polling_ms) or 0.0
+        deadline = _deadline_for_timeout(timeout_ms)
+        while True:
+            attempt_timeout = 0.0 if deadline is None else max(_remaining_timeout_ms(deadline), 1.0)
+            try:
+                frames = await self._evaluate_frames_async(
+                    expression, arg, timeout=attempt_timeout, wait_for_navigation=False
+                )
+            except LythonHostError as error:
+                if not _is_retryable_context_error(error) or (
+                    deadline is not None and _remaining_timeout_ms(deadline) <= 0
+                ):
+                    raise
+                frames = []
+            if any(frame.error is None and frame.content for frame in frames):
+                return frames
+            if deadline is not None and _remaining_timeout_ms(deadline) <= 0:
+                raise LythonTimeoutError(
+                    "wait_for_function_all_frames timed out before any frame matched"
+                )
+            if interval_ms > 0:
+                wait = interval_ms
+                if deadline is not None:
+                    wait = min(wait, _remaining_timeout_ms(deadline))
+                if wait > 0:
+                    # Host-side sleep; see the sync method for why not
+                    # wait_for_timeout_async().
+                    await asyncio.sleep(wait / 1000)
+
     def wait_for_timeout(self, timeout: float) -> None:
+        """Wait *timeout* milliseconds.
+
+        The wait runs on the host, like Playwright's driver-side
+        ``wait_for_timeout`` — not inside the page. A page-side timer would be
+        broadcast to every frame and inherit the all-frames aggregate delay,
+        which both inflates short waits (to the per-frame timeout) and can time
+        out on an unresponsive frame. The WebView keeps running while we sleep.
+        """
         delay = _validate_timeout_ms(timeout)
         assert delay is not None
-        self.evaluate(
-            _WAIT_FOR_TIMEOUT_EXPRESSION,
-            delay,
-            timeout=0 if delay == 0 else delay + 1_000,
-        )
+        if delay > 0:
+            time.sleep(delay / 1000)
 
     async def wait_for_timeout_async(self, timeout: float) -> None:
+        """Async counterpart of :meth:`wait_for_timeout`."""
         delay = _validate_timeout_ms(timeout)
         assert delay is not None
-        await self.evaluate_async(
-            _WAIT_FOR_TIMEOUT_EXPRESSION,
-            delay,
-            timeout=0 if delay == 0 else delay + 1_000,
-        )
+        if delay > 0:
+            await asyncio.sleep(delay / 1000)
 
     def wait_for_selector(
         self,
@@ -904,4 +1159,11 @@ class Locator:
             raise TypeError("no_wait_after must be a boolean or None")
 
 
-__all__ = ["LoadState", "Locator", "Page", "SelectorState"]
+__all__ = [
+    "FrameError",
+    "FrameResult",
+    "LoadState",
+    "Locator",
+    "Page",
+    "SelectorState",
+]
