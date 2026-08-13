@@ -5,6 +5,3 @@ __pycache__/
 .venv/
 build/
 dist/
-
-
-test.ps1
