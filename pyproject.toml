@@ -11,7 +11,21 @@ requires-python = ">=3.14"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Layla Network" }]
+keywords = ["layla", "lython", "sdk", "llm", "automation", "browser"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/l3utterfly/layla-python-sdk"
+Repository = "https://github.com/l3utterfly/layla-python-sdk"
+Issues = "https://github.com/l3utterfly/layla-python-sdk/issues"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
