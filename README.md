@@ -1,5 +1,16 @@
 # Layla Python SDK
 
+<table>
+  <tr>
+    <td>
+      <img src="assets/layla.png" alt="Layla butterfly logo" width="160">
+    </td>
+    <td>
+      <code>layla-python-sdk</code> is the standard-library-only Python SDK distribution for code running inside Layla's embedded Python runtime. It is imported as <code>lython</code> and communicates with the Layla host through the private <code>lython_native</code> string transport, exposing one-shot APIs for characters, chat completions, inference engines, chat history and sessions, scheduled chat messages, sentiment classification, image generation, memories, personas, TTS, private files, execution context, and Playwright-style WebView automation.
+    </td>
+  </tr>
+</table>
+
 `layla-python-sdk` is the standard-library-only Python SDK distribution for
 code running inside Layla's embedded Python runtime. It is imported as
 `lython` and communicates with the Layla host through the private
@@ -955,6 +966,22 @@ GitHub Releases contain a universal wheel and source distribution. To publish:
 The release workflow tests, builds, and checks both distributions before
 creating the GitHub Release. A tag that does not match `project.version` is
 rejected.
+
+## Layla App
+
+Visit the official Layla website: https://www.layla-network.ai/
+
+Download the Layla app:
+
+<p>
+  <a href="https://play.google.com/store/apps/details?id=com.layla">
+    <img src="./assets/google_badge.png" alt="Get it on Google Play" height="60">
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://apps.apple.com/us/app/layla/id6456886656">
+    <img src="./assets/apple_badge.png" alt="Download on the App Store" height="60">
+  </a>
+</p>
 
 ## License
 
