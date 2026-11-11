@@ -255,6 +255,39 @@ def _parse_frame_results(value: Any) -> list[FrameResult]:
     return frames
 
 
+def _describe_frames(frames: list[FrameResult]) -> str:
+    """Render the last per-frame probe results for an all-frames timeout message.
+
+    Without this the two ways an all-frames wait can fail are indistinguishable:
+
+    - A frame that ran the probe and genuinely did not match is *listed here*
+      with the value it returned. That is a selector or readiness problem.
+    - A frame that is visible on screen but *absent from this list* was never
+      reached by the fan-out at all -- no document-start bootstrap (a frame with
+      no real document, e.g. one still waiting on an IntersectionObserver to get
+      its ``src``), or a reply that did not make it back up in time.
+
+    The distinction decides where to look, so it belongs in the error itself
+    rather than in a separate diagnostic pass.
+    """
+
+    if not frames:
+        return "no frame replied to the probe at all"
+
+    lines = [f"{len(frames)} frame{'' if len(frames) == 1 else 's'} replied:"]
+    for index, frame in enumerate(frames):
+        if frame.error is not None:
+            detail = f"raised {frame.error.name}: {frame.error.message}"
+        else:
+            detail = f"returned {frame.content!r}"
+        lines.append(f"  [{index}] {frame.url or '<unknown url>'} {detail}")
+    lines.append(
+        "A frame that is visible on screen but missing from this list was never "
+        "reached by the all-frames fan-out."
+    )
+    return "\n".join(lines)
+
+
 def _top_frame_content(frames: list[FrameResult]) -> Any:
     """Reduce the per-frame array to the top frame's value for scalar callers.
 
@@ -656,7 +689,8 @@ class Page:
                 return frames
             if deadline is not None and _remaining_timeout_ms(deadline) <= 0:
                 raise LythonTimeoutError(
-                    "wait_for_function_all_frames timed out before any frame matched"
+                    "wait_for_function_all_frames timed out before any frame "
+                    f"matched; {_describe_frames(frames)}"
                 )
             if interval_ms > 0:
                 wait = interval_ms
@@ -698,7 +732,8 @@ class Page:
                 return frames
             if deadline is not None and _remaining_timeout_ms(deadline) <= 0:
                 raise LythonTimeoutError(
-                    "wait_for_function_all_frames timed out before any frame matched"
+                    "wait_for_function_all_frames timed out before any frame "
+                    f"matched; {_describe_frames(frames)}"
                 )
             if interval_ms > 0:
                 wait = interval_ms

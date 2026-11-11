@@ -12,6 +12,7 @@ to impose a native deadline.
 - [Characters](#characters)
 - [Chat](#chat)
 - [Classifier and images](#classifier-and-images)
+- [Nightmare Mobile video](#nightmare-mobile-video)
 - [Memories and personas](#memories-and-personas)
 - [TTS and files](#tts-and-files)
 - [Execution context](#execution-context)
@@ -102,13 +103,66 @@ Scheduled messages contain `id`, `character_id`, nullable `session_id`, future
 lython.classifier.get_sentiment(text) -> dict[str, float]
 lython.images.get_image_generation_models() -> list[dict]
 lython.images.generate_image(
-    prompt, img2img_base64=None, model_id=None
+    prompt, img2img_base64=None, model_id=None, *, reference_images=None, timeout=None
 ) -> str | None
 ```
 
 Image models have `id`, `name`, and `description`. Generated images and
 `img2img_base64` use complete data URIs. Generation is final-only; progress
 events are intentionally unavailable.
+
+`reference_images` accepts a sequence of complete base64 image data URIs and
+sends the `reference_images` wire field in order. It can be combined with the
+img2img base. `None` omits it; `[]` sends an empty list. The host rejects raw
+base64/remote URLs and unsupported image models with `LythonHostError`. Reference
+editing requires host support; older hosts may ignore the field. The same
+keyword is available on `generate_image_async`.
+
+## Nightmare Mobile video
+
+```python
+lython.nightmare_mobile.get_models(*, timeout=None) -> list[dict]
+lython.nightmare_mobile.generate_video(
+    model_id, prompt, *, negative_prompt=None, width=None, height=None,
+    frames=None, fps=None, seed=None, image_data_base64=None,
+    end_image_data_base64=None, denoise_strength=None, timeout=None
+) -> dict
+```
+
+The resource class `NightmareMobile` and the package-level `nightmare_mobile`
+instance are exported from `lython`. Explicit `LythonClient` instances have the
+same resource. Methods also have `get_models_async` and `generate_video_async`
+forms. The commands are `nightmaremobile_get_models` (data is `None`) and
+`nightmaremobile_generate_video`; they wait for their respective
+`on_nightmaremobile_*_response` terminal events. No progress events or callbacks
+are exposed to Python.
+
+Catalog entries include missing/downloading models (`downloaded: False`) and
+follow content visibility settings. Fields: `id`, `name`, `description`,
+`downloaded`, `start_image` (`none`/`optional`/`required`), `end_image`,
+`size_presets` (width/height mappings), `size_multiple`, `min_size`, `max_size`,
+`max_area`, `trained_fps`, `max_duration`, `frame_options`, `fps_options`.
+Capabilities/limits describe the mini-app UI and are advisory for API callers.
+
+Only supplied generation controls override the latest UI-saved `sdcpp.json`.
+`None` is omitted; empty negative prompts and zero seeds/strength are preserved.
+Omitted start/end images and previews are inherited. LoRAs and sampling remain
+in the saved config. There are no duration, aspect-ratio, sampler, steps, CFG,
+sigma, or LoRA arguments. The host applies basic type/value validation and lets
+the engine determine capability support.
+
+Image inputs are complete base64 image data URIs. `width`/`height` and `frames`
+are positive integers; `fps` is a positive finite number. `seed` takes `-1` for
+random or an unsigned 64-bit integer/decimal string. Python integers outside
+JavaScript's safe integer range are encoded as decimal strings. Results contain
+`model_id`, `video_data_base64` (with `data:video/mp4;base64,`), a string `seed`,
+`width`, `height`, `frame_count`, `fps`, `duration_ms`, `generation_time_ms`.
+The clip also stays in Nightmare Mobile history.
+
+Calls wait indefinitely by default; supply a finite native `timeout` for a
+deadline. Async cancellation does not stop native generation. Errors use the
+existing `LythonHostError` / `LythonTimeoutError` handling. Requires a Layla host
+implementing both Nightmare Mobile commands.
 
 ## Memories and personas
 

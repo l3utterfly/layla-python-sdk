@@ -402,6 +402,57 @@ class BrowserTests(unittest.TestCase):
         with self.assertRaises(lython.LythonTimeoutError):
             page.wait_for_function_all_frames("() => false", polling_ms=1, timeout=10)
 
+    def test_all_frames_timeout_reports_the_frames_that_answered(self) -> None:
+        """The timeout must name the frames that replied and what they returned.
+
+        This is the perchance failure shape: only the top frame answers, so the
+        message has to make clear the generator iframe was never reached rather
+        than reached-but-not-matching.
+        """
+
+        native = WaitAllFramesNative(
+            [[{"url": "https://perchance.org/p889q72b51", "content": False}]]
+        )
+        page = LythonClient(LythonTransport(native_module=native)).page
+
+        with self.assertRaises(lython.LythonTimeoutError) as caught:
+            page.wait_for_function_all_frames("() => false", polling_ms=1, timeout=10)
+
+        message = str(caught.exception)
+        self.assertIn("1 frame replied", message)
+        self.assertIn("https://perchance.org/p889q72b51", message)
+        self.assertIn("returned False", message)
+        self.assertIn("never reached", message)
+
+    def test_all_frames_timeout_reports_a_frame_error(self) -> None:
+        native = WaitAllFramesNative(
+            [
+                [
+                    {
+                        "url": "https://embed.example.com/",
+                        "content": None,
+                        "error": {"name": "EvalError", "message": "blocked by CSP"},
+                    }
+                ]
+            ]
+        )
+        page = LythonClient(LythonTransport(native_module=native)).page
+
+        with self.assertRaises(lython.LythonTimeoutError) as caught:
+            page.wait_for_function_all_frames("() => false", polling_ms=1, timeout=10)
+
+        message = str(caught.exception)
+        self.assertIn("raised EvalError: blocked by CSP", message)
+
+    def test_all_frames_timeout_reports_when_nothing_replied(self) -> None:
+        native = WaitAllFramesNative([[]])
+        page = LythonClient(LythonTransport(native_module=native)).page
+
+        with self.assertRaises(lython.LythonTimeoutError) as caught:
+            page.wait_for_function_all_frames("() => false", polling_ms=1, timeout=10)
+
+        self.assertIn("no frame replied to the probe at all", str(caught.exception))
+
     def test_invalid_browser_arguments_fail_before_transport(self) -> None:
         with self.assertRaises(TypeError):
             self.page.evaluate("")

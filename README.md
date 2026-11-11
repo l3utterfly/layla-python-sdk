@@ -6,7 +6,7 @@
       <img src="assets/layla.png" alt="Layla butterfly logo" width="160">
     </td>
     <td>
-      <code>layla-python-sdk</code> is the standard-library-only Python SDK distribution for code running inside Layla's embedded Python runtime. It is imported as <code>lython</code> and communicates with the Layla host through the private <code>lython_native</code> string transport, exposing one-shot APIs for characters, chat completions, inference engines, chat history and sessions, scheduled chat messages, sentiment classification, image generation, memories, personas, TTS, private files, execution context, and Playwright-style WebView automation.
+      <code>layla-python-sdk</code> is the standard-library-only Python SDK distribution for code running inside Layla's embedded Python runtime. It is imported as <code>lython</code> and communicates with the Layla host through the private <code>lython_native</code> string transport, exposing one-shot APIs for characters, chat completions, inference engines, chat history and sessions, scheduled chat messages, sentiment classification, image generation and reference editing, Nightmare Mobile video generation, memories, personas, TTS, private files, execution context, and Playwright-style WebView automation.
     </td>
   </tr>
 </table>
@@ -33,6 +33,7 @@ There is no HTTP endpoint, API key, or base URL. The package requires Python
 - [Scheduled chat messages](#scheduled-chat-messages)
 - [Sentiment classifier](#sentiment-classifier)
 - [Image generation](#image-generation)
+- [Nightmare Mobile video generation](#nightmare-mobile-video-generation)
 - [Memories](#memories)
 - [Personas](#personas)
 - [Text to speech](#text-to-speech)
@@ -126,6 +127,7 @@ This table enumerates every async resource method.
 | `chat` | `get_inference_engines_async`, `set_inference_engine_async`, `get_chat_history_async`, `get_chat_sessions_async`, `save_chat_message_async`, `schedule_chat_message_async`, `get_scheduled_chat_messages_async`, `cancel_scheduled_chat_message_async` |
 | `classifier` | `get_sentiment_async` |
 | `images` | `get_image_generation_models_async`, `generate_image_async` |
+| `nightmare_mobile` | `get_models_async`, `generate_video_async` |
 | `memories` | `list_async`, `get_top_memories_async`, `create_or_update_async` |
 | `personas` | `get_async` |
 | `tts` | `get_voices_async`, `generate_voice_async`, `generate_voice_to_file_async`, `stop_speaking_async` |
@@ -145,6 +147,7 @@ This table enumerates every async resource method.
 | `chat` | `schedule_chat_message`, `get_scheduled_chat_messages`, `cancel_scheduled_chat_message` | Scheduled-message data |
 | `classifier` | `get_sentiment` | Sentiment score mapping |
 | `images` | `get_image_generation_models`, `generate_image` | Model metadata or image data URI |
+| `nightmare_mobile` | `get_models`, `generate_video` | WAN model catalog or final MP4 data URI and metadata |
 | `memories` | `list`, `get_top_memories`, `create_or_update` | Memory dictionaries |
 | `personas` | `get` | Persona dictionary |
 | `tts` | `get_voices`, `generate_voice`, `generate_voice_to_file`, `stop_speaking` | Voice data, file result, or `None` |
@@ -259,10 +262,26 @@ completion = lython.chat.completions.create(
 Do not pass both `body` and `messages`. `stream=True` raises `LythonError`
 because the embedded transport returns only a final response.
 
+With the keyword form, OpenAI options can be passed directly:
+
+```python
+completion = lython.chat.completions.create(
+    messages=messages, tools=tools, tool_choice="auto", temperature=0.2,
+)
+```
+
+Final replies decode `<think>` and `<tool_call>` markup. Tool calls appear in
+`choices[0]["message"]["tool_calls"]`, with JSON-string `function.arguments` and
+`finish_reason: "tool_calls"`. Visible content excludes the markup. Arguments
+can be incomplete or invalid JSON: parse and validate them before use. Every
+constructed completion includes `message.refusal: None` and `choice.logprobs:
+None`. Already structured host completions are preserved.
+
+
 ### Image input
 
-Chat accepts OpenAI-style content parts with at most one base64 image data URI
-per message:
+Chat accepts OpenAI-style content parts, including multiple base64 image data
+URIs per message on Layla 7.5 and newer:
 
 ```python
 completion = lython.chat.completions.create(
@@ -283,9 +302,16 @@ completion = lython.chat.completions.create(
 )
 ```
 
-PNG, JPEG, GIF, and WebP data URIs are accepted. Remote image URLs and multiple
-images in one message are rejected. Multiple text parts are joined with
-newlines.
+On Layla 7.5 and newer, the complete OpenAI request body is forwarded unchanged
+except for the host-internal `stream` flag. Tools, tool result IDs, sampling and
+response-format options, optional assistant content, and multiple image parts
+are preserved. The host decides which model features it supports.
+
+The SDK probes the host version once per client, with a maximum two-second
+deadline, and falls back to legacy chat when the probe fails or the host is
+older. Legacy translation maps `developer` to `system`, keeps one PNG/JPEG/GIF/
+WebP base64 image per message, joins text parts with newlines, and warns when
+unsupported images, content parts, or tool/function messages are ignored.
 
 ## Inference engines
 
@@ -438,6 +464,92 @@ image_data_uri = lython.images.generate_image(
 
 The method returns a complete generated-image data URI or `None`. Generation
 is final-only; progress callbacks and events are not available.
+
+For native reference-image editing, pass `reference_images` as a keyword-only
+sequence of complete base64 image data URIs. References preserve their order
+and can be combined with the img2img base image:
+
+```python
+edited_image = lython.images.generate_image(
+    "Turn the red apple green, keeping the composition unchanged",
+    model_id="qwen-image-2.1-turbo-htp",
+    reference_images=[source_image_data_uri],
+    timeout=600,
+)
+```
+
+Omit the argument or pass `None` to keep it off the wire; `[]` sends an empty
+reference list. Raw base64 and remote URLs are not accepted by the host. A
+non-empty list with an unsupported model raises `LythonHostError`. This needs
+a host build implementing `generate_image.reference_images`; older hosts may
+ignore it. `generate_image_async` accepts the same arguments. Existing
+positional `prompt`, `img2img_base64`, and `model_id` calls remain compatible.
+
+## Nightmare Mobile video generation
+
+### `nightmare_mobile.get_models`
+
+```python
+models = lython.nightmare_mobile.get_models(timeout=30)
+model = next((item for item in models if item["downloaded"]), None)
+if model is None:
+    raise RuntimeError("Download a WAN model in Nightmare Mobile first")
+```
+
+The catalog includes undownloaded models and follows the host's content
+visibility settings. Entries contain `id`, `name`, `description`, `downloaded`,
+`start_image`, `end_image`, `size_presets`, `size_multiple`, `min_size`,
+`max_size`, `max_area`, `trained_fps`, `max_duration`, `frame_options`, and
+`fps_options`. These capabilities and limits describe the UI and are advisory;
+API inputs are not constrained by them.
+
+### `nightmare_mobile.generate_video`
+
+```python
+video = lython.nightmare_mobile.generate_video(
+    "wan22_ti2v_turbo",
+    "The apple gently turns on a wooden table, fixed camera",
+    width=512,
+    height=320,
+    frames=25,
+    fps=24,
+    seed=42,
+    image_data_base64=source_image_data_uri,
+    timeout=900,
+)
+print(video["model_id"], video["seed"], video["frame_count"])
+```
+
+`model_id` and `prompt` are required. All remaining arguments are keyword-only:
+`negative_prompt`, `width`, `height`, `frames`, `fps`, `seed`,
+`image_data_base64`, `end_image_data_base64`, `denoise_strength`, and `timeout`.
+Options passed as `None` are omitted. Zero seeds/strength and empty negative
+prompts are sent unchanged. Images must be complete base64 image data URIs.
+
+The host reads the latest UI-saved `sdcpp.json` for every run and overrides only
+supplied options. Omitted settings, including saved start/end images and
+preview settings, are inherited. LoRAs, samplers, steps, CFG, and sigmas stay in
+that saved configuration. Use `width`/`height` and `frames`/`fps`; there are no
+aspect-ratio or duration request options. The host applies basic input checks,
+while the engine determines what can run beyond the advisory model limits.
+
+The returned mapping contains `model_id`, `video_data_base64` (a complete
+`data:video/mp4;base64,` URI), `seed` (a decimal string), `width`, `height`,
+`frame_count`, `fps`, `duration_ms`, and `generation_time_ms`. Python integer
+seeds outside JavaScript's safe integer range are sent as decimal strings to
+preserve precision; callers may also pass decimal strings directly. The
+generated clip remains in the host's Nightmare Mobile history.
+
+Both methods have `_async` counterparts with the same arguments and return
+shapes. Python receives only the terminal response, with no progress callbacks
+or events. Async cancellation does not stop native generation. Host failures
+raise `LythonHostError`; native deadlines raise `LythonTimeoutError`. This
+requires a Layla host implementing both `nightmaremobile_*` commands.
+
+The repository's `lython_api_diagnostics.py` includes the reference-image
+variant and WAN model-list/generation checks. It uses the pinned Qwen and WAN
+model IDs above, skips them if unavailable, and reuses its generated image as
+the reference/start image instead of requiring a separate image file.
 
 ## Memories
 
@@ -893,11 +1005,125 @@ except LythonHostError as error:
 
 `LythonHostError` also exposes `details`, `retryable`, and `raw_message`.
 
+## Additional one-shot public APIs
+
+These methods mirror the public TypeScript SDK using Python snake_case names,
+without streaming, event subscriptions, progress callbacks, or abort signals.
+Every method below also has an `_async` counterpart and accepts keyword-only
+`timeout` in seconds. Async calls still return one final result. Optional
+`None` controls are omitted; `False`, zero and empty strings are preserved.
+
+### Image tags
+
+```python
+lython.images.get_tag_dictionaries() -> list
+lython.images.get_tags(dictionary_filename, *, offset=0, limit=50, category=None) -> dict
+lython.images.get_tag(dictionary_filename, english) -> dict | None
+lython.images.upsert_tag(dictionary_filename, tag, replacing=None) -> dict
+lython.images.delete_tag(dictionary_filename, english) -> bool
+lython.images.search_tags(dictionary_filename, query, *, mode=None, offset=0, limit=50, category=None) -> dict
+lython.images.suggest_tags(dictionary_filename, query, *, limit=40) -> list
+```
+
+Use the dictionary filename returned by discovery. Tags and pages retain the
+host's documented fields (`english`, aliases, translations, category, counts,
+pagination). `get_tag` returns `None` when absent; `delete_tag` returns `False`
+when already absent. `replacing` identifies the exact existing name to rename.
+Search mode is `"name"` or `"prefix"`; a zero limit is forwarded to the host.
+
+### NeoDragon video
+
+```python
+lython.neodragon.generate_video(
+    image_data_base64, prompt, *, seed=None, upscale=None, fps=None,
+    cinematic_prompt=None, crop=None,
+) -> dict
+```
+
+The source is a complete base64 image data URI. `crop` has normalized `x`, `y`,
+`width`, and `height`. The returned mapping contains `video_data_base64` (an MP4
+data URI), seed, dimensions, frame count, FPS, duration and generation time.
+Omitted controls use host defaults; `seed=0` and `upscale=False` remain valid.
+
+### Ace-Step music and raw passes
+
+```python
+lython.acestep.get_models() -> list
+lython.acestep.generate_music(prompt, lyrics=None, duration=None, *, model_id=None) -> str | None
+lython.acestep.lm(request, *, model_id=None, use_gpu=None) -> list
+lython.acestep.synth(request, *, model_id=None, use_gpu=None, use_flash_attn=None, vae_tile_size=None) -> dict
+lython.acestep.understand(source, *, model_id=None, request=None, return_latents=None, use_gpu=None, use_flash_attn=None, vae_tile_size=None) -> dict
+lython.acestep.vae_encode(audio_base64, *, model_id=None, request=None, use_gpu=None, vae_tile_size=None) -> dict
+lython.acestep.vae_decode(latents_base64, *, model_id=None, request=None, use_gpu=None, vae_tile_size=None) -> dict
+```
+
+Choose a model with `ready_for_use: True`. `generate_music` returns an audio data
+URI; duration is in seconds. The raw request mapping retains every model field,
+including unknown fields, so LM/analysis results can be passed to `synth`.
+Generation and raw passes queue within a client so the shared music engine
+never runs overlapping passes. Chat completions likewise queue within a client.
+Raw `request` keys match the engine contract (for example `caption`,
+`audio_codes`, `output_format`, and `lm_temperature`). The synth result includes
+inline audio, the resolved seed, and the resolved request.
+
+`understand` takes exactly one source: `{"audio_base64": audio}` or
+`{"latents_base64": latents}`. Audio may include a data URI prefix. Encoded
+latents are base64 raw f32 `[T, 64]` bytes; they can be decoded or reused for
+analysis. `return_latents=True` returns latents with audio-source analysis.
+VAE results retain the host's audio/latents and metadata. No raw-pass output is
+saved to private storage automatically. Use `utils.save_file` to keep it.
+
+### Files, notifications, SQL and Cloud
+
+```python
+lython.utils.list_dir(path) -> list
+lython.utils.delete_file_or_dir(path) -> None
+lython.utils.schedule_notification(notification) -> dict
+lython.utils.get_scheduled_notifications() -> list
+lython.utils.cancel_scheduled_notification(id) -> dict
+lython.db.execute_sql(query, params=None) -> dict
+lython.cloud.login() -> str | None
+```
+
+File paths are relative to the calling app's private workspace. Pass `""` to
+list its root; entries have `path` and `is_dir`. Deletion is recursive and waits
+for acknowledgement. Private files and SQL require a host-provided workspace.
+
+A notification mapping has `message`, a future Unix-millisecond `timestamp`,
+and an optional relative `icon` path. Omitted/`None` icons use the default.
+The result includes the host-assigned ID needed for cancellation. Listing
+returns pending notifications belonging to the calling app.
+
+SQL accepts bound parameters, e.g. `execute_sql("SELECT ?", [42])`. Results
+retain `rows`, `rowsAffected`, and `insertId`. Cloud login returns the account's
+access token or `None`; use it as a Bearer token in your own HTTP requests.
+
+### Contextual questions and speech recognition controls
+
+```python
+lython.contextual.send_out_of_band_message(message, *, image_base64=None, json_schema=None) -> str
+lython.stt.start_listening() -> None
+lython.stt.stop_listening() -> None
+```
+
+An out-of-band question uses the current conversation without entering its
+history. The optional image includes its data URI prefix; `json_schema` is a
+schema mapping enforced only by engines that support constrained decoding.
+The result is the host's final reply text.
+
+STT controls only acknowledge starting/stopping the recognizer. Python does
+not receive transcript events. Background-audio controls are excluded because
+they have no terminal host response. No event or progress APIs are exposed.
+
+The new resource classes `AceStep`, `NeoDragon`, `DB`, `Cloud`, and `STT`, and
+their package instances, are exported from `lython` and available on explicit
+`LythonClient` instances.
+
 ## Runtime limitations
 
 - Chat completions are final-only; no streaming iterator is exposed.
 - Image generation is final-only; no progress callbacks are exposed.
-- Context is a one-shot lookup; contextual `on`/`off` subscriptions are absent.
+- Context lookup and out-of-band questions are one-shot; contextual `on`/`off` subscriptions are absent.
 - Background-audio controls are absent because they are fire-and-forget and
   event-driven.
 - WebView evaluation is JSON-only. DOM nodes, functions, cyclic objects, and

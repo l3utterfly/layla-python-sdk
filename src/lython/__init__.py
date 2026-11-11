@@ -17,6 +17,11 @@ from .protocol import (
 )
 from .request import OneShotRequestTemplate
 from .resources import (
+    AceStep,
+    Cloud,
+    DB,
+    NeoDragon,
+    STT,
     Chat,
     Characters,
     Classifier,
@@ -24,6 +29,7 @@ from .resources import (
     Images,
     LythonClient,
     Memories,
+    NightmareMobile,
     Personas,
     TTS,
     Utils,
@@ -35,6 +41,7 @@ _client = LythonClient()
 chat = _client.chat
 characters = _client.characters
 images = _client.images
+nightmare_mobile = _client.nightmare_mobile
 classifier = _client.classifier
 utils = _client.utils
 memories = _client.memories
@@ -42,6 +49,11 @@ personas = _client.personas
 tts = _client.tts
 contextual = _client.contextual
 page = _client.page
+acestep = _client.acestep
+cloud = _client.cloud
+db = _client.db
+neodragon = _client.neodragon
+stt = _client.stt
 
 
 def notify(message: str) -> None:
@@ -50,6 +62,16 @@ def notify(message: str) -> None:
     _client.notify(message)
 
 __all__ = [
+    "AceStep",
+    "Cloud",
+    "DB",
+    "NeoDragon",
+    "STT",
+    "acestep",
+    "cloud",
+    "db",
+    "neodragon",
+    "stt",
     "LythonError",
     "LythonExecutionError",
     "LythonHostError",
@@ -73,6 +95,7 @@ __all__ = [
     "Contextual",
     "Images",
     "Memories",
+    "NightmareMobile",
     "Personas",
     "TTS",
     "Utils",
@@ -85,6 +108,7 @@ __all__ = [
     "encode_layla_request",
     "images",
     "memories",
+    "nightmare_mobile",
     "notify",
     "page",
     "personas",

@@ -1,7 +1,7 @@
 """Run an end-to-end diagnostic of every unique Lython one-shot API.
 
 This script is intended to run inside Layla's embedded Python runtime.  It
-tests each underlying SDK operation once. Async counterparts are intentionally
+tests each underlying SDK operation plus a reference-image editing variant. Async counterparts are intentionally
 not repeated because they route to the same host commands.
 
 Each successful API check is sent to the host with ``lython.notify()``. Failed
@@ -44,9 +44,12 @@ from lython import (
 # Increase these if the device/model is slow.  Every request remains bounded.
 DEFAULT_TIMEOUT_SECONDS = 60.0
 GENERATION_TIMEOUT_SECONDS = 300.0
+VIDEO_GENERATION_TIMEOUT_SECONDS = 900.0
 TTS_TIMEOUT_SECONDS = 180.0
 BROWSER_TIMEOUT_MS = 60_000.0
-EXPECTED_API_COUNT = 28
+EXPECTED_API_COUNT = 31
+REFERENCE_IMAGE_MODEL_ID = "qwen-image-2.1-turbo-htp"
+WAN_MODEL_ID = "wan22_ti2v_turbo"
 
 # Set this to True when using the script from a test harness that relies on a
 # non-zero exit code.  False is friendlier to Layla's interactive runner.
@@ -273,6 +276,60 @@ def require_data_uri(value: Any, media_type: str, description: str) -> None:
         raise APIReportedFailure(
             f"{description} was not a base64 {media_type} data URI: {_format(value)}"
         )
+
+
+def require_wan_models(value: Any) -> None:
+    if not isinstance(value, list) or any(
+        not isinstance(model, Mapping)
+        or not isinstance(model.get("id"), str)
+        or not isinstance(model.get("downloaded"), bool)
+        for model in value
+    ):
+        raise APIReportedFailure("WAN model catalog must list IDs and downloaded state")
+
+
+def require_wan_video(value: Any) -> None:
+    require_mapping(value, "Generated WAN video")
+    require_data_uri(value.get("video_data_base64"), "video/mp4", "Generated WAN video")
+    if value.get("model_id") != WAN_MODEL_ID:
+        raise APIReportedFailure("Unexpected WAN model in result")
+    if not isinstance(value.get("seed"), str):
+        raise APIReportedFailure("WAN resolved seed must be a decimal string")
+    for field in ("width", "height", "frame_count", "fps", "duration_ms"):
+        number = value.get(field)
+        if not isinstance(number, (int, float)) or number <= 0:
+            raise APIReportedFailure(f"Invalid WAN video {field}")
+
+
+def _installed_diagnostic_model(models: Any, model_id: str, *, wan: bool = False) -> None:
+    if isinstance(models, list) and any(
+        isinstance(model, Mapping) and model.get("id") == model_id
+        and (not wan or model.get("downloaded") is True)
+        for model in models
+    ):
+        return
+    raise SkipAPI(f"Download {model_id} before running this diagnostic.")
+
+
+def diagnostic_reference_edit(models: Any, source_image: Any) -> str | None:
+    _installed_diagnostic_model(models, REFERENCE_IMAGE_MODEL_ID)
+    source = require(source_image, "Image generation must succeed before reference editing.")
+    require_data_uri(source, "image/", "Reference image")
+    return lython.images.generate_image(
+        f"{MARKER} Change the blue circle to a green circle, keeping the composition unchanged.",
+        model_id=REFERENCE_IMAGE_MODEL_ID, reference_images=[source],
+        timeout=GENERATION_TIMEOUT_SECONDS,
+    )
+
+
+def diagnostic_wan_video(models: Any, source_image: Any) -> Mapping[str, Any]:
+    _installed_diagnostic_model(models, WAN_MODEL_ID, wan=True)
+    source = source_image if isinstance(source_image, str) else None
+    return lython.nightmare_mobile.generate_video(
+        WAN_MODEL_ID, f"{MARKER} A blue circle gently bounces on a white background, fixed camera.",
+        width=512, height=320, frames=25, fps=24, seed=42,
+        image_data_base64=source, timeout=VIDEO_GENERATION_TIMEOUT_SECONDS,
+    )
 
 
 def require_chat_completion(value: Any) -> None:
@@ -585,7 +642,7 @@ def main() -> int:
         purpose="List installed image-generation models.",
     )
     image_model_id = select_string_id(image_models)
-    run_api(
+    generated_image = run_api(
         "images.generate_image",
         lambda: lython.images.generate_image(
             f"{MARKER} A simple small blue circle on a white background",
@@ -596,6 +653,25 @@ def main() -> int:
         validate=lambda value: require_data_uri(
             value, "image/", "Generated image data URI"
         ),
+    )
+
+    run_api(
+        "images.generate_image.reference_images",
+        lambda: diagnostic_reference_edit(image_models, generated_image),
+        purpose=f"Reference edit with {REFERENCE_IMAGE_MODEL_ID}, reusing the generated image.",
+        validate=lambda value: require_data_uri(value, "image/", "Reference edit image"),
+    )
+    wan_models = run_api(
+        "nightmare_mobile.get_models",
+        lambda: lython.nightmare_mobile.get_models(timeout=DEFAULT_TIMEOUT_SECONDS),
+        purpose="List WAN video models, including downloaded state.",
+        validate=require_wan_models,
+    )
+    run_api(
+        "nightmare_mobile.generate_video",
+        lambda: diagnostic_wan_video(wan_models, generated_image),
+        purpose=f"Generate with {WAN_MODEL_ID}: 512x320, 25 frames at 24 FPS, seed 42.",
+        validate=require_wan_video,
     )
 
     completion = run_api(

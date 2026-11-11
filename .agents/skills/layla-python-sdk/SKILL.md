@@ -1,6 +1,6 @@
 ---
 name: layla-python-sdk
-description: Use the project-local `lython` Python SDK to call Layla's embedded one-shot APIs and automate Layla's host-owned WebView. Trigger when writing, reviewing, testing, or debugging Python that imports `lython`; building Lython scripts or agents; using `lython.page`, Playwright-like page or locator helpers, JavaScript evaluation, DOM automation, navigation, clicks, fills, or page-side waits; or accessing Layla characters, final chat completions, inference engines, chat history and schedules, sentiment, image generation, memories, personas, TTS, private files, or execution context. Do not use for the TypeScript `@layla-network/sdk`, React Native host/controller implementation, streaming responses, contextual event subscriptions, background audio, or unrelated Python work.
+description: Use the project-local `lython` Python SDK to call Layla's embedded one-shot APIs and automate Layla's host-owned WebView. Trigger when writing, reviewing, testing, or debugging Python that imports `lython`; building Lython scripts or agents; using `lython.page`, Playwright-like page or locator helpers, JavaScript evaluation, DOM automation, navigation, clicks, fills, or page-side waits; or accessing Layla characters, final chat completions, inference engines, chat history and schedules, sentiment, image generation and reference editing, Nightmare Mobile video generation, memories, personas, TTS, private files, or execution context. Do not use for the TypeScript `@layla-network/sdk`, React Native host/controller implementation, streaming responses, contextual event subscriptions, background audio, or unrelated Python work.
 ---
 
 # Layla Python SDK (`lython`)
@@ -31,7 +31,8 @@ module or hand-built protocol messages.
 | `lython.chat` | Final chat completions, inference engines, history, sessions, scheduled messages |
 | `lython.characters` | List, image, create/update (Character Card V2) |
 | `lython.classifier` | Sentiment scores |
-| `lython.images` | Generation models, final-only image generation |
+| `lython.images` | Generation models, final-only image generation and reference editing |
+| `lython.nightmare_mobile` | WAN model catalog and final-only video generation |
 | `lython.memories` | List, top memories, create/update |
 | `lython.personas` | Global or per-character persona |
 | `lython.tts` | Voices, speak, speak-to-file, stop |
@@ -68,6 +69,41 @@ from lython import LythonClient, LythonTransport
 client = LythonClient(LythonTransport(default_timeout=120))
 history = client.chat.get_chat_history("session-id")
 ```
+
+### Reference editing and Nightmare Mobile video
+
+Use `lython.images.generate_image(..., reference_images=[image_data_uri])` for
+native reference editing. References are a keyword-only sequence of complete
+base64 image data URIs, preserving order; they may be combined with
+`img2img_base64`. `None` omits the field, `[]` sends an empty list. On supported
+hosts, a non-empty list with an unsupported image model raises `LythonHostError`.
+Older hosts may ignore reference images.
+
+Use `lython.nightmare_mobile.get_models()` to list IDs, download state, and
+advisory UI capabilities. `generate_video(model_id, prompt, *, width=None,
+height=None, frames=None, fps=None, ...)` generates a WAN MP4. Both have `_async`
+counterparts. Choose a downloaded model for generation.
+
+```python
+video = lython.nightmare_mobile.generate_video(
+    "wan22_ti2v_turbo", "An apple gently turns on a wooden table",
+    width=512, height=320, frames=25, fps=24, seed=42,
+    image_data_base64=source_image_data_uri, timeout=900,
+)
+print(video["model_id"], video["seed"], video["frame_count"])
+```
+
+The host applies supplied controls over the latest UI-saved `sdcpp.json`.
+Omitted options, including saved images and previews, are inherited. Capability
+limits are advisory: do not reject API values based on them. Expose no duration,
+aspect-ratio, LoRA, sampler, step, CFG, or sigma options. Image inputs and the MP4
+output include their data URI prefixes. The returned seed is a decimal string;
+large Python integer seeds are encoded as strings to preserve 64-bit precision
+across the JavaScript host. See `references/api.md` for all fields and options.
+
+Video generation is final-only, with no progress callbacks/events. Async
+cancellation does not cancel native generation. The host must implement the
+two `nightmaremobile_*` commands.
 
 ### Timeouts
 
@@ -202,7 +238,7 @@ for a complete WebView automation script.
 Layla's embedded APIs are request/response only — there are no event streams or
 callbacks. Do not try to add them.
 
-- Image generation is final-only; no progress callbacks or events.
+- Image and video generation are final-only; no progress callbacks or events.
 - Use `lython.contextual.get_execution_context`; there are no contextual
   `on`/`off` subscriptions.
 - `lython.notify(message)` is the intentional fire-and-forget path. It calls
